@@ -56,13 +56,13 @@ if (isset($_GET['search']) && $_GET['search'] != '') {
     $params[] = "%$search%";
 }
 
-// Single lead export
+// Single lead export - FIXED: Changed 'id' to 'l.id' to specify the leads table
 if ($lead_id > 0) {
-    $where = "WHERE id = ?";
+    $where = "WHERE l.id = ?";  // FIXED: Added 'l.' prefix
     $params = [$lead_id];
 }
 
-// Get the data
+// Get the data - FIXED: Added 'l.' prefix for ORDER BY to be specific
 $query = "SELECT 
     l.id,
     l.user_custom_id,
@@ -91,12 +91,13 @@ $query = "SELECT
 FROM leads l
 LEFT JOIN users u ON l.created_by = u.id
 $where
-ORDER BY l.created_at DESC";
+ORDER BY l.created_at DESC";  // FIXED: Added 'l.' prefix
 
 $stmt = $pdo->prepare($query);
 $stmt->execute($params);
 $leads = $stmt->fetchAll();
 
+// Rest of the code remains the same from here...
 // Set filename
 $filename = 'leads_export_' . date('Y-m-d_H-i-s');
 

@@ -1,23 +1,26 @@
 <?php
+// Start output buffering at the very beginning
+ob_start();
+
 require_once 'config.php';
 
 if (!isLoggedIn()) {
     redirect('index.php');
 }
 
-// Include header AFTER all PHP logic
-require_once 'includes/header.php';
-
+// Handle ALL redirects BEFORE any output
 // Mark all as read
 if (isset($_GET['mark_read'])) {
     $pdo->prepare("UPDATE notifications SET is_read = 1 WHERE user_id = ?")->execute([$_SESSION['user_id']]);
     redirect('notifications.php');
+    exit();
 }
 
 // Mark single as read
 if (isset($_GET['read']) && isset($_GET['id'])) {
     $pdo->prepare("UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?")->execute([$_GET['id'], $_SESSION['user_id']]);
     redirect('notifications.php');
+    exit();
 }
 
 // Get notifications
@@ -34,7 +37,11 @@ $notifications = $notifications->fetchAll();
 $unread_count = $pdo->prepare("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0");
 $unread_count->execute([$_SESSION['user_id']]);
 $unread_count = $unread_count->fetchColumn();
+
+// Include header AFTER all PHP logic
+require_once 'includes/header.php';
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -59,7 +66,7 @@ $unread_count = $unread_count->fetchColumn();
 <body>
     <div class="header">
         <h2>Power Sonic CRM - Notifications</h2>
-        <div>Welcome, <?php echo $_SESSION['full_name']; ?> | <a href="logout.php" style="color: white;">Logout</a></div>
+        <div>Welcome, <?php echo $_SESSION['full_name']; ?></div>
     </div>
     
     <div class="container">

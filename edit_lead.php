@@ -117,7 +117,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body>
     <div class="header">
         <h2>Power Sonic CRM - Edit Lead</h2>
-        <div>Welcome, <?php echo $_SESSION['full_name']; ?> | <a href="logout.php" style="color: white;">Logout</a></div>
+        <div>Welcome, <?php echo $_SESSION['full_name']; ?></div>
     </div>
     
     <div class="container">
