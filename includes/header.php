@@ -1,6 +1,18 @@
 <?php
 // No session_start() here - it's already in config.php
 // config.php should be included BEFORE this file
+// Get company settings for logo
+$company_settings = [];
+$stmt = $pdo->query("SELECT company_name, company_logo, company_favicon FROM company_settings LIMIT 1");
+$company_settings = $stmt->fetch();
+if (!$company_settings) {
+    $company_settings = ['company_name' => 'Power Sonic', 'company_logo' => null, 'company_favicon' => null];
+}
+
+// Add favicon to head section
+if (!empty($company_settings['company_favicon']) && file_exists($company_settings['company_favicon'])) {
+    echo '<link rel="icon" type="image/x-icon" href="' . $company_settings['company_favicon'] . '">';
+}
 
 // Get notification count for current user
 $notif_count = 0;
@@ -56,10 +68,19 @@ $current_page = basename($_SERVER['PHP_SELF']);
             width: 80px;
         }
 
-        .sidebar.collapsed .sidebar-header h3,
+        .sidebar.collapsed .sidebar-header .logo-text,
+        .sidebar.collapsed .sidebar-header .company-tagline,
         .sidebar.collapsed .menu-text,
         .sidebar.collapsed .menu-badge {
             display: none;
+        }
+
+        .sidebar.collapsed .sidebar-header {
+            padding: 15px 10px;
+        }
+
+        .sidebar.collapsed .logo-img {
+            margin: 0 auto;
         }
 
         .sidebar.collapsed .menu-item {
@@ -72,36 +93,69 @@ $current_page = basename($_SERVER['PHP_SELF']);
             font-size: 1.5rem;
         }
 
-        /* Sidebar Header */
+        /* Sidebar Header with Logo */
         .sidebar-header {
-            padding: 25px 20px;
+            padding: 20px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
             margin-bottom: 20px;
-            text-align: center;
         }
 
-        .logo {
+        .logo-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+        }
+
+        /* Logo Image Style - For actual image file */
+        .logo-img {
+            width: 50px;
+            height: 50px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 10px;
+            overflow: hidden;
         }
 
-        .logo i {
-            font-size: 32px;
-            color: #48bb78;
+        .logo-img img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
         }
 
-        .logo h3 {
+        /* Logo Icon Style - If using icon instead of image */
+        .logo-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            color: white;
+        }
+
+        .logo-text {
+            flex: 1;
+        }
+
+        .logo-text h3 {
             font-size: 18px;
-            font-weight: 600;
+            font-weight: 700;
             letter-spacing: 1px;
+            color: white;
+            margin: 0;
+            line-height: 1.3;
         }
 
-        .logo p {
-            font-size: 10px;
+        .company-tagline {
+            font-size: 9px;
             opacity: 0.7;
-            margin-top: 5px;
+            margin-top: 3px;
+            letter-spacing: 0.5px;
         }
 
         /* User Profile Section */
@@ -453,12 +507,22 @@ $current_page = basename($_SERVER['PHP_SELF']);
     <div class="crm-wrapper">
         <!-- Sidebar -->
         <div class="sidebar" id="sidebar">
+            <!-- Sidebar Header with Logo -->
             <div class="sidebar-header">
-                <div class="logo">
-                    <i class="fas fa-bolt"></i>
-                    <div>
-                        <h3>Power Sonic CRM</h3>
-                        <p>Lead Management System</p>
+                <div class="logo-container">
+                    <?php if(!empty($company_settings['company_logo']) && file_exists($company_settings['company_logo'])): ?>
+                        <div class="logo-img">
+                            <img src="<?php echo $company_settings['company_logo']; ?>" alt="Company Logo">
+                        </div>
+                    <?php else: ?>
+                        <div class="logo-icon">
+                            <i class="fas fa-bolt"></i>
+                        </div>
+                    <?php endif; ?>
+                    
+                    <div class="logo-text">
+                        <h3><?php echo htmlspecialchars($company_settings['company_name']); ?></h3>
+                        <div class="company-tagline">Lead Management System</div>
                     </div>
                 </div>
             </div>
@@ -573,6 +637,12 @@ $current_page = basename($_SERVER['PHP_SELF']);
                         <i class="fas fa-key"></i>
                         <span class="menu-text">Change Password</span>
                     </a>
+                    <?php if(isAdmin()): ?>
+                    <a href="company_settings.php" class="menu-item <?php echo $current_page == 'company_settings.php' ? 'active' : ''; ?>">
+                        <i class="fas fa-building"></i>
+                        <span class="menu-text">Company Settings</span>
+                    </a>
+                    <?php endif; ?>
                 </div>
             </div>
 
