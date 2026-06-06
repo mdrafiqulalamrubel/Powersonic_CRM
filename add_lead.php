@@ -16,42 +16,13 @@ $agent_id = $_SESSION['user_id'];
 $agent_name = $_SESSION['full_name'];
 $agent_username = $_SESSION['username'];
 
-// Generate Agent Code (format: AG-YYYY-XXXX)
-function generateAgentCode($agent_id, $pdo) {
-    $stmt = $pdo->prepare("SELECT agent_code FROM users WHERE id = ?");
-    $stmt->execute([$agent_id]);
-    $existing_code = $stmt->fetchColumn();
-    
-    if ($existing_code) {
-        return $existing_code;
-    }
-    
-    // Generate new agent code
-    $year = date('Y');
-    $code = 'AG-' . $year . '-' . str_pad($agent_id, 4, '0', STR_PAD_LEFT);
-    
-    // Save to users table
-    $update = $pdo->prepare("UPDATE users SET agent_code = ? WHERE id = ?");
-    $update->execute([$code, $agent_id]);
-    
-    return $code;
-}
+// NOTE: generateAgentCode(), generateCustomerID(), generateUniqueLeadId(), 
+// generateUserID(), uploadPhoto() are already defined in config.php
+// DO NOT redeclare them here!
 
-// Generate Customer ID (format: CUST-YYYYMMDD-XXXX)
-function generateCustomerID($pdo) {
-    $date_prefix = date('Ymd');
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM leads WHERE customer_id LIKE ? AND DATE(created_at) = CURDATE()");
-    $stmt->execute([$date_prefix . '-%']);
-    $count = $stmt->fetchColumn() + 1;
-    
-    return 'CUST-' . $date_prefix . '-' . str_pad($count, 5, '0', STR_PAD_LEFT);
-}
-
-// Get agent code for current user
+// Get agent code for current user (using the function from config.php)
 $agent_code = generateAgentCode($agent_id, $pdo);
 
-// Get districts, police stations, and post offices for Bangladesh
-<?php
 // Complete Districts of Bangladesh (64 districts with 2018 updated spellings)
 $districts = [
     // Barishal Division (6 districts)
@@ -356,7 +327,7 @@ $police_stations = [
     ]
 ];
 
-// Post offices mapping - simplified version (can be expanded)
+// Post offices mapping - simplified version
 $post_offices = [
     'Dhaka' => [
         'Dhaka GPO', 'Bangshal', 'Gulshan', 'Banani', 'Motijheel', 
@@ -409,7 +380,6 @@ function getLocationFromIP() {
     return ['city' => 'Unknown', 'lat' => '23.8103', 'lng' => '90.4125'];
 }
 
-
 // Get current location for map
 $location = getLocationFromIP();
 $default_lat = $location['lat'];
@@ -437,10 +407,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $latitude = $_POST['latitude'] ?? $default_lat;
     $longitude = $_POST['longitude'] ?? $default_lng;
     
-    // Generate IDs
-    $lead_unique_id = generateUniqueLeadId(); // From config.php
+    // Generate IDs - using functions from config.php
+    $lead_unique_id = generateUniqueLeadId();
     $customer_id = generateCustomerID($pdo);
-    $user_custom_id = generateUserID($district, $pdo); // From config.php
+    $user_custom_id = generateUserID($district, $pdo);
     
     // Get agent info from session
     $agent_id = $_SESSION['user_id'];
