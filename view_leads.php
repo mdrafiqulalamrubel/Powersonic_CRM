@@ -40,9 +40,16 @@ if (isset($_GET['lead_stage']) && $_GET['lead_stage'] != '') {
     $params[] = $_GET['lead_stage'];
 }
 
+if (isset($_GET['agent_code']) && $_GET['agent_code'] != '') {
+    $where .= " AND agent_code = ?";
+    $params[] = $_GET['agent_code'];
+}
+
 if (isset($_GET['search']) && $_GET['search'] != '') {
     $search = $_GET['search'];
-    $where .= " AND (name LIKE ? OR phone LIKE ? OR user_custom_id LIKE ? OR lead_unique_id LIKE ?)";
+    $where .= " AND (name LIKE ? OR phone LIKE ? OR customer_id LIKE ? OR lead_unique_id LIKE ? OR agent_code LIKE ? OR agent_name LIKE ?)";
+    $params[] = "%$search%";
+    $params[] = "%$search%";
     $params[] = "%$search%";
     $params[] = "%$search%";
     $params[] = "%$search%";
@@ -57,6 +64,9 @@ $leads = $stmt->fetchAll();
 // Get unique values for filters
 $districts = $pdo->query("SELECT DISTINCT district FROM leads WHERE district IS NOT NULL AND district != ''")->fetchAll();
 $lead_stages = $pdo->query("SELECT DISTINCT lead_stage FROM leads WHERE lead_stage IS NOT NULL")->fetchAll();
+
+// Get unique agent codes for filter
+$agent_codes = $pdo->query("SELECT DISTINCT agent_code, agent_name FROM leads WHERE agent_code IS NOT NULL AND agent_code != '' ORDER BY agent_code")->fetchAll();
 ?>
 
 <style>
@@ -155,7 +165,7 @@ $lead_stages = $pdo->query("SELECT DISTINCT lead_stage FROM leads WHERE lead_sta
     .data-table {
         width: 100%;
         border-collapse: collapse;
-        min-width: 1000px;
+        min-width: 1200px;
     }
     
     .data-table th {
@@ -170,6 +180,7 @@ $lead_stages = $pdo->query("SELECT DISTINCT lead_stage FROM leads WHERE lead_sta
         padding: 12px;
         border-bottom: 1px solid #eee;
         font-size: 13px;
+        vertical-align: middle;
     }
     
     .data-table tr:hover {
@@ -204,6 +215,8 @@ $lead_stages = $pdo->query("SELECT DISTINCT lead_stage FROM leads WHERE lead_sta
         display: inline-flex;
         align-items: center;
         gap: 3px;
+        border-radius: 3px;
+        text-decoration: none;
     }
     
     .export-buttons {
@@ -243,6 +256,37 @@ $lead_stages = $pdo->query("SELECT DISTINCT lead_stage FROM leads WHERE lead_sta
         border-radius: 5px;
         font-size: 13px;
         transition: all 0.3s;
+    }
+    
+    .customer-id {
+        font-family: monospace;
+        font-size: 12px;
+        background: #e8f4f8;
+        padding: 3px 6px;
+        border-radius: 4px;
+        white-space: nowrap;
+    }
+    
+    .agent-code-badge {
+        font-family: monospace;
+        font-size: 11px;
+        background: #f0f0f0;
+        padding: 3px 6px;
+        border-radius: 4px;
+        white-space: nowrap;
+        display: inline-block;
+    }
+    
+    .agent-name {
+        font-size: 11px;
+        color: #666;
+        margin-top: 2px;
+    }
+    
+    .lead-id {
+        font-family: monospace;
+        font-size: 11px;
+        color: #666;
     }
 </style>
 
@@ -311,7 +355,7 @@ $lead_stages = $pdo->query("SELECT DISTINCT lead_stage FROM leads WHERE lead_sta
     <form method="GET" class="filter-form">
         <div class="filter-group">
             <label>🔍 Search</label>
-            <input type="text" name="search" placeholder="Name, Phone, ID..." value="<?php echo htmlspecialchars($_GET['search'] ?? ''); ?>">
+            <input type="text" name="search" placeholder="Name, Phone, Customer ID, Agent..." value="<?php echo htmlspecialchars($_GET['search'] ?? ''); ?>">
         </div>
         
         <div class="filter-group">
@@ -351,6 +395,19 @@ $lead_stages = $pdo->query("SELECT DISTINCT lead_stage FROM leads WHERE lead_sta
         </div>
         
         <div class="filter-group">
+            <label>👤 Agent</label>
+            <select name="agent_code">
+                <option value="">All Agents</option>
+                <?php foreach($agent_codes as $agent): ?>
+                    <option value="<?php echo htmlspecialchars($agent['agent_code']); ?>" 
+                        <?php echo (isset($_GET['agent_code']) && $_GET['agent_code'] == $agent['agent_code']) ? 'selected' : ''; ?>>
+                        <?php echo htmlspecialchars($agent['agent_name'] . ' (' . $agent['agent_code'] . ')'); ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        
+        <div class="filter-group">
             <label>📍 Area</label>
             <input type="text" name="area" placeholder="Area name..." value="<?php echo htmlspecialchars($_GET['area'] ?? ''); ?>">
         </div>
@@ -371,11 +428,12 @@ $lead_stages = $pdo->query("SELECT DISTINCT lead_stage FROM leads WHERE lead_sta
     <table class="data-table">
         <thead>
             <tr>
-                <th>User ID</th>
+                <th>Customer ID</th>
                 <th>Lead ID</th>
                 <th>Name</th>
                 <th>Phone</th>
                 <th>District</th>
+                <th>Agent</th>
                 <th>Priority</th>
                 <th>Stage</th>
                 <th>Amount</th>
@@ -388,17 +446,23 @@ $lead_stages = $pdo->query("SELECT DISTINCT lead_stage FROM leads WHERE lead_sta
             <?php if(count($leads) > 0): ?>
                 <?php foreach($leads as $lead): ?>
                 <tr>
-                    <td>
-                        <small style="font-family: monospace;"><?php echo $lead['user_custom_id'] ?? 'N/A'; ?></small>
+                    <td class="customer-id">
+                        <i class="fas fa-id-card"></i> <?php echo $lead['customer_id'] ?? 'N/A'; ?>
                     </td>
-                    <td>
-                        <small style="font-family: monospace;"><?php echo $lead['lead_unique_id']; ?></small>
+                    <td class="lead-id">
+                        <small><?php echo $lead['lead_unique_id']; ?></small>
                     </td>
                     <td>
                         <strong><?php echo htmlspecialchars($lead['name']); ?></strong>
                     </td>
                     <td><?php echo $lead['phone']; ?></td>
                     <td><?php echo htmlspecialchars($lead['district'] ?? 'N/A'); ?></td>
+                    <td>
+                        <span class="agent-code-badge">
+                            <i class="fas fa-user-tie"></i> <?php echo $lead['agent_code'] ?? 'N/A'; ?>
+                        </span>
+                        <div class="agent-name"><?php echo htmlspecialchars($lead['agent_name'] ?? ''); ?></div>
+                    </td>
                     <td class="priority-<?php echo strtolower($lead['priority']); ?>">
                         <?php echo $lead['priority']; ?>
                     </td>
@@ -430,22 +494,22 @@ $lead_stages = $pdo->query("SELECT DISTINCT lead_stage FROM leads WHERE lead_sta
                     <td><?php echo date('Y-m-d', strtotime($lead['created_at'])); ?></td>
                     <td>
                         <div style="display: flex; gap: 5px; flex-wrap: wrap;">
-                            <a href="view_lead.php?id=<?php echo $lead['id']; ?>" class="btn-sm" style="background: #3498db; color: white; padding: 4px 8px; border-radius: 3px; text-decoration: none;" title="View Details">
+                            <a href="view_lead.php?id=<?php echo $lead['id']; ?>" class="btn-sm" style="background: #3498db; color: white;" title="View Details">
                                 <i class="fas fa-eye"></i>
                             </a>
                             <?php if(isAdmin()): ?>
-                            <a href="edit_lead.php?id=<?php echo $lead['id']; ?>" class="btn-sm" style="background: #27ae60; color: white; padding: 4px 8px; border-radius: 3px; text-decoration: none;" title="Edit Lead">
+                            <a href="edit_lead.php?id=<?php echo $lead['id']; ?>" class="btn-sm" style="background: #27ae60; color: white;" title="Edit Lead">
                                 <i class="fas fa-edit"></i>
                             </a>
                             <?php endif; ?>
-                            <a href="add_communication.php?lead_id=<?php echo $lead['id']; ?>" class="btn-sm" style="background: #f39c12; color: white; padding: 4px 8px; border-radius: 3px; text-decoration: none;" title="Add Communication">
+                            <a href="add_communication.php?lead_id=<?php echo $lead['id']; ?>" class="btn-sm" style="background: #f39c12; color: white;" title="Add Communication">
                                 <i class="fas fa-comment"></i>
                             </a>
-                            <a href="schedule_task.php?lead_id=<?php echo $lead['id']; ?>" class="btn-sm" style="background: #9b59b6; color: white; padding: 4px 8px; border-radius: 3px; text-decoration: none;" title="Schedule Follow-up">
+                            <a href="schedule_task.php?lead_id=<?php echo $lead['id']; ?>" class="btn-sm" style="background: #9b59b6; color: white;" title="Schedule Follow-up">
                                 <i class="fas fa-calendar"></i>
                             </a>
                             <?php if($lead['google_map_link']): ?>
-                            <a href="<?php echo $lead['google_map_link']; ?>" target="_blank" class="btn-sm" style="background: #e74c3c; color: white; padding: 4px 8px; border-radius: 3px; text-decoration: none;" title="View on Map">
+                            <a href="<?php echo $lead['google_map_link']; ?>" target="_blank" class="btn-sm" style="background: #e74c3c; color: white;" title="View on Map">
                                 <i class="fas fa-map-marker-alt"></i>
                             </a>
                             <?php endif; ?>
@@ -455,7 +519,7 @@ $lead_stages = $pdo->query("SELECT DISTINCT lead_stage FROM leads WHERE lead_sta
                 <?php endforeach; ?>
             <?php else: ?>
                 <tr>
-                    <td colspan="11" style="text-align: center; padding: 40px;">
+                    <td colspan="12" style="text-align: center; padding: 40px;">
                         <i class="fas fa-inbox" style="font-size: 48px; color: #ccc;"></i>
                         <p style="margin-top: 15px;">No leads found matching your criteria.</p>
                         <a href="add_lead.php" class="btn" style="margin-top: 10px;">+ Add New Lead</a>

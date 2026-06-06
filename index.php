@@ -46,7 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>POS - Login</title>
+    <title>Custom CRM - Login</title>
     <style>
         * {
             margin: 0;
@@ -129,7 +129,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body>
     <div class="login-container">
         <div class="login-header">
-            <h1>POS</h1>
+            <h1>Daffodil CRM</h1>
             <p>Lead Management System</p>
         </div>
         

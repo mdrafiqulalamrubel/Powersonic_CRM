@@ -313,6 +313,27 @@ foreach ($tasks as &$task) {
     </div>
     
     <div class="info-grid">
+        <!-- Agent Information Section - Add these items -->
+        <div class="info-item">
+            <div class="info-label"><i class="fas fa-user-tie"></i> Agent Code</div>
+            <div class="info-value">
+                <code style="background: #f0f0f0; padding: 4px 8px; border-radius: 4px;">
+                    <?php echo $lead['agent_code'] ?? 'N/A'; ?>
+                </code>
+            </div>
+        </div>
+        <div class="info-item">
+            <div class="info-label"><i class="fas fa-user-check"></i> Agent Name</div>
+            <div class="info-value">
+                <strong><?php echo htmlspecialchars($lead['agent_name'] ?? $lead['agent_name'] ?? 'Unknown'); ?></strong>
+            </div>
+        </div>
+        <div class="info-item">
+            <div class="info-label"><i class="fas fa-id-card"></i> Agent ID</div>
+            <div class="info-value">
+                <?php echo $lead['agent_id'] ?? 'N/A'; ?>
+            </div>
+        </div>
         <div class="info-item">
             <div class="info-label"><i class="fas fa-id-card"></i> User Custom ID</div>
             <div class="info-value"><code><?php echo $lead['user_custom_id'] ?? 'N/A'; ?></code></div>

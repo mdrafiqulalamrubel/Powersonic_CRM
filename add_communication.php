@@ -20,8 +20,8 @@ if (!$lead) {
 $message = '';
 $error = '';
 
-// Handle file upload function
-function uploadMultipleFiles($files, $communication_id, $pdo, $user_id) {
+// Handle file upload function - FIXED (removed uploaded_by column)
+function uploadMultipleFiles($files, $communication_id, $pdo) {
     $upload_dir = "uploads/communications/$communication_id/";
     if (!file_exists($upload_dir)) {
         mkdir($upload_dir, 0777, true);
@@ -55,8 +55,9 @@ function uploadMultipleFiles($files, $communication_id, $pdo, $user_id) {
             $file_path = $upload_dir . $unique_name;
             
             if (move_uploaded_file($tmp_name, $file_path)) {
-                $stmt = $pdo->prepare("INSERT INTO communication_attachments (communication_id, file_name, file_path, file_size, file_type, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)");
-                $stmt->execute([$communication_id, $file_name, $file_path, $file_size, $file_type, $user_id]);
+                // FIXED: Removed uploaded_by column
+                $stmt = $pdo->prepare("INSERT INTO communication_attachments (communication_id, file_name, file_path, file_size, file_type) VALUES (?, ?, ?, ?, ?)");
+                $stmt->execute([$communication_id, $file_name, $file_path, $file_size, $file_type]);
                 $uploaded_files[] = $file_name;
             }
         }
@@ -72,23 +73,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $pdo->beginTransaction();
         
-        $stmt = $pdo->prepare("INSERT INTO communications (lead_id, communication_type, notes, created_by, has_attachments) VALUES (?, ?, ?, ?, ?)");
-        $stmt->execute([$lead_id, $type, $notes, $_SESSION['user_id'], isset($_FILES['attachments']) ? true : false]);
+        // FIXED: Removed has_attachments column if it doesn't exist
+        $stmt = $pdo->prepare("INSERT INTO communications (lead_id, communication_type, notes, created_by, created_at) VALUES (?, ?, ?, ?, NOW())");
+        $stmt->execute([$lead_id, $type, $notes, $_SESSION['user_id']]);
         
         $communication_id = $pdo->lastInsertId();
         
         // Handle multiple file uploads
         $uploaded_files = [];
         if (isset($_FILES['attachments']) && !empty($_FILES['attachments']['name'][0])) {
-            $uploaded_files = uploadMultipleFiles($_FILES['attachments'], $communication_id, $pdo, $_SESSION['user_id']);
+            $uploaded_files = uploadMultipleFiles($_FILES['attachments'], $communication_id, $pdo);
         }
         
         $pdo->commit();
+        
+        // Update last_contact_date
+        $pdo->prepare("UPDATE leads SET last_contact_date = NOW() WHERE id = ?")->execute([$lead_id]);
         
         $message = "Communication logged successfully!";
         if (count($uploaded_files) > 0) {
             $message .= " " . count($uploaded_files) . " file(s) uploaded.";
         }
+        
+        // Redirect after 2 seconds
+        echo "<script>setTimeout(function(){ window.location.href = 'view_lead.php?id=$lead_id'; }, 2000);</script>";
         
     } catch(Exception $e) {
         $pdo->rollBack();
@@ -98,6 +106,78 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 ?>
 
 <style>
+    .form-container {
+        max-width: 800px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 10px;
+        padding: 30px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    
+    .form-group {
+        margin-bottom: 20px;
+    }
+    
+    label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 600;
+        color: #333;
+    }
+    
+    select, textarea, input[type="date"] {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        font-size: 14px;
+    }
+    
+    textarea {
+        resize: vertical;
+        min-height: 120px;
+    }
+    
+    button {
+        background: #27ae60;
+        color: white;
+        padding: 12px 30px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 16px;
+    }
+    
+    button:hover {
+        background: #219a52;
+    }
+    
+    .message {
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 20px;
+    }
+    
+    .success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+    }
+    
+    .error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+    }
+    
+    .lead-info {
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+    }
+    
     .attachment-area {
         border: 2px dashed #ddd;
         border-radius: 10px;
@@ -107,20 +187,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         transition: all 0.3s;
         margin-top: 10px;
     }
+    
     .attachment-area:hover {
         border-color: #3498db;
         background: #f0f8ff;
     }
+    
     .attachment-area.dragover {
         border-color: #27ae60;
         background: #d4edda;
     }
+    
     .file-list {
         margin-top: 15px;
         display: flex;
         flex-wrap: wrap;
         gap: 10px;
     }
+    
     .file-item {
         background: #f8f9fa;
         padding: 5px 10px;
@@ -130,14 +214,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         align-items: center;
         gap: 5px;
     }
+    
     .file-item i {
         color: #3498db;
     }
+    
     .remove-file {
         color: #e74c3c;
         cursor: pointer;
         margin-left: 5px;
     }
+    
     .progress-bar {
         width: 100%;
         height: 5px;
@@ -147,33 +234,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         margin-top: 10px;
         display: none;
     }
+    
     .progress-fill {
         width: 0%;
         height: 100%;
         background: #27ae60;
         transition: width 0.3s;
     }
+    
+    .btn-cancel {
+        background: #95a5a6;
+        color: white;
+        padding: 12px 30px;
+        text-decoration: none;
+        border-radius: 5px;
+        display: inline-block;
+        margin-left: 10px;
+    }
+    
+    .btn-cancel:hover {
+        background: #7f8c8d;
+    }
 </style>
 
-<div style="max-width: 800px; margin: 0 auto; background: white; border-radius: 10px; padding: 30px;">
-    <h2 style="margin-bottom: 20px;">Add Communication for: <?php echo htmlspecialchars($lead['name']); ?></h2>
+<div class="form-container">
+    <h2><i class="fas fa-comment"></i> Add Communication</h2>
+    
+    <div class="lead-info">
+        <strong>Lead:</strong> <?php echo htmlspecialchars($lead['name']); ?> 
+        (<?php echo $lead['phone']; ?>)
+    </div>
     
     <?php if($message): ?>
-        <div style="background: #d4edda; color: #155724; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
-            <?php echo $message; ?>
-        </div>
+        <div class="message success"><?php echo $message; ?></div>
     <?php endif; ?>
     
     <?php if($error): ?>
-        <div style="background: #f8d7da; color: #721c24; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
-            <?php echo $error; ?>
-        </div>
+        <div class="message error"><?php echo $error; ?></div>
     <?php endif; ?>
     
     <form method="POST" enctype="multipart/form-data" id="commForm">
-        <div style="margin-bottom: 20px;">
-            <label style="display: block; margin-bottom: 5px; font-weight: 600;">Communication Type *</label>
-            <select name="type" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+        <div class="form-group">
+            <label>Communication Type *</label>
+            <select name="type" required>
                 <option value="Phone Call">📞 Phone Call</option>
                 <option value="Site Visit">🏠 Site Visit</option>
                 <option value="Offer/Quotation">📄 Offer/Quotation</option>
@@ -184,13 +287,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </select>
         </div>
         
-        <div style="margin-bottom: 20px;">
-            <label style="display: block; margin-bottom: 5px; font-weight: 600;">Notes / Details *</label>
-            <textarea name="notes" rows="5" required placeholder="Enter detailed notes about this communication..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;"></textarea>
+        <div class="form-group">
+            <label>Notes / Details *</label>
+            <textarea name="notes" rows="5" required placeholder="Enter detailed notes about this communication..."></textarea>
         </div>
         
-        <div style="margin-bottom: 20px;">
-            <label style="display: block; margin-bottom: 5px; font-weight: 600;">Attachments (Max 10 files, up to 10MB each)</label>
+        <div class="form-group">
+            <label>Attachments (Max 10 files, up to 10MB each)</label>
             <div class="attachment-area" id="dropZone">
                 <i class="fas fa-cloud-upload-alt" style="font-size: 48px; color: #3498db;"></i>
                 <p>Drag & drop files here or click to select</p>
@@ -203,13 +306,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div class="file-list" id="fileList"></div>
         </div>
         
-        <div style="display: flex; gap: 10px; margin-top: 20px;">
-            <button type="submit" style="background: #27ae60; color: white; padding: 12px 30px; border: none; border-radius: 5px; cursor: pointer;">
-                <i class="fas fa-save"></i> Save Communication
-            </button>
-            <a href="view_lead.php?id=<?php echo $lead_id; ?>" style="background: #95a5a6; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px;">
-                <i class="fas fa-times"></i> Cancel
-            </a>
+        <div>
+            <button type="submit"><i class="fas fa-save"></i> Save Communication</button>
+            <a href="view_lead.php?id=<?php echo $lead_id; ?>" class="btn-cancel"><i class="fas fa-times"></i> Cancel</a>
         </div>
     </form>
 </div>
@@ -258,6 +357,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 continue;
             }
             
+            // Check for duplicates
+            if (selectedFiles.some(f => f.name === file.name && f.size === file.size)) {
+                continue;
+            }
+            
             selectedFiles.push(file);
             displayFile(file);
         }
@@ -268,12 +372,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     function displayFile(file) {
         const fileItem = document.createElement('div');
         fileItem.className = 'file-item';
+        const fileIcon = getFileIcon(file.type);
         fileItem.innerHTML = `
-            <i class="fas fa-file"></i>
+            <i class="fas ${fileIcon}"></i>
             <span>${file.name} (${(file.size / 1024).toFixed(1)} KB)</span>
-            <i class="fas fa-times remove-file" onclick="removeFile('${file.name}')"></i>
+            <i class="fas fa-times remove-file" onclick="removeFile('${file.name.replace(/'/g, "\\'")}')"></i>
         `;
         fileList.appendChild(fileItem);
+    }
+    
+    function getFileIcon(fileType) {
+        if (fileType.includes('image')) return 'fa-image';
+        if (fileType.includes('pdf')) return 'fa-file-pdf';
+        if (fileType.includes('word')) return 'fa-file-word';
+        if (fileType.includes('excel')) return 'fa-file-excel';
+        if (fileType.includes('zip')) return 'fa-file-archive';
+        return 'fa-file';
     }
     
     function removeFile(fileName) {
@@ -293,18 +407,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         fileInput.files = dataTransfer.files;
     }
     
-    // Progress bar simulation (optional)
+    // Progress bar simulation
     document.getElementById('commForm').addEventListener('submit', function() {
-        document.getElementById('progressBar').style.display = 'block';
+        const progressBar = document.getElementById('progressBar');
+        const progressFill = document.getElementById('progressFill');
+        progressBar.style.display = 'block';
         let width = 0;
         const interval = setInterval(() => {
             if (width >= 100) {
                 clearInterval(interval);
             } else {
                 width += 10;
-                document.getElementById('progressFill').style.width = width + '%';
+                progressFill.style.width = width + '%';
             }
-        }, 200);
+        }, 100);
     });
 </script>
 

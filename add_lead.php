@@ -11,61 +11,381 @@ require_once 'includes/header.php';
 $message = '';
 $error = '';
 
-// Get districts, police stations, and post offices for Bangladesh
-$districts = [
-    'Dhaka', 'Chittagong', 'Khulna', 'Rajshahi', 'Barisal', 'Sylhet', 
-    'Rangpur', 'Mymensingh', 'Comilla', 'Narayanganj', 'Gazipur', 'Tangail'
-];
+// Get current logged-in agent info
+$agent_id = $_SESSION['user_id'];
+$agent_name = $_SESSION['full_name'];
+$agent_username = $_SESSION['username'];
 
-// Police stations mapping by district
-$police_stations = [
-    'Dhaka' => ['Gulshan', 'Banani', 'Mohakhali', 'Dhanmondi', 'Mirpur', 'Uttara', 'Motijheel', 'Paltan', 'Ramna', 'Shahbag'],
-    'Chittagong' => ['Double Mooring', 'Khulshi', 'Panchlaish', 'Halishahar', 'Patenga', 'Bakalia', 'Chandgaon'],
-    'Khulna' => ['Khulna Sadar', 'Sonadanga', 'Daulatpur', 'Khalishpur', 'Khan Jahan Ali', 'Rupsha'],
-    'Rajshahi' => ['Boalia', 'Rajpara', 'Motihar', 'Shah Makhdum', 'Kashiadanga'],
-    'Barisal' => ['Barisal Sadar', 'Kawnia', 'Airport', 'Bottola', 'Choramoni'],
-    'Sylhet' => ['Sylhet Sadar', 'Jalalabad', 'Shahporan', 'Mogla Bazar', 'Taltala'],
-    'Rangpur' => ['Rangpur Sadar', 'Haragach', 'Pirgacha', 'Badarganj'],
-    'Mymensingh' => ['Mymensingh Sadar', 'Kewatkhali', 'Shambhuganj', 'Biddyaganj'],
-    'Comilla' => ['Comilla Sadar', 'Kandirpar', 'Dhormopur', 'Shashongacha'],
-    'Narayanganj' => ['Narayanganj Sadar', 'Fatullah', 'Siddhirganj', 'Bandar'],
-    'Gazipur' => ['Gazipur Sadar', 'Tongi', 'Joydebpur', 'Kaliakoir'],
-    'Tangail' => ['Tangail Sadar', 'Kagmari', 'Santosh', 'Bashail']
-];
-
-// Post offices mapping by police station (simplified - you can expand this)
-$post_offices = [
-    'Gulshan' => ['Gulshan-1', 'Gulshan-2', 'Banani', 'Niketon'],
-    'Banani' => ['Banani DOHS', 'Banani Chairman Bari', 'Banani Bazar'],
-    'Dhanmondi' => ['Dhanmondi-1', 'Dhanmondi-2', 'Dhanmondi-3', 'Dhanmondi-4'],
-    'Mirpur' => ['Mirpur-1', 'Mirpur-2', 'Mirpur-6', 'Mirpur-10', 'Mirpur-12'],
-    'Uttara' => ['Uttara Model Town', 'Uttara Sector-1', 'Uttara Sector-3', 'Uttara Sector-7'],
-    // Add more mappings as needed
-];
-
-// Generate unique User ID (Date+District+Number)
-function generateUserID($district, $pdo) {
-    $date_prefix = date('Ymd');
-    $district_code = strtoupper(substr(preg_replace('/[^A-Za-z]/', '', $district), 0, 3));
+// Generate Agent Code (format: AG-YYYY-XXXX)
+function generateAgentCode($agent_id, $pdo) {
+    $stmt = $pdo->prepare("SELECT agent_code FROM users WHERE id = ?");
+    $stmt->execute([$agent_id]);
+    $existing_code = $stmt->fetchColumn();
     
-    // Get last number for this district today
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM leads WHERE user_custom_id LIKE ? AND DATE(created_at) = CURDATE()");
-    $stmt->execute([$date_prefix . '-' . $district_code . '-%']);
+    if ($existing_code) {
+        return $existing_code;
+    }
+    
+    // Generate new agent code
+    $year = date('Y');
+    $code = 'AG-' . $year . '-' . str_pad($agent_id, 4, '0', STR_PAD_LEFT);
+    
+    // Save to users table
+    $update = $pdo->prepare("UPDATE users SET agent_code = ? WHERE id = ?");
+    $update->execute([$code, $agent_id]);
+    
+    return $code;
+}
+
+// Generate Customer ID (format: CUST-YYYYMMDD-XXXX)
+function generateCustomerID($pdo) {
+    $date_prefix = date('Ymd');
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM leads WHERE customer_id LIKE ? AND DATE(created_at) = CURDATE()");
+    $stmt->execute([$date_prefix . '-%']);
     $count = $stmt->fetchColumn() + 1;
     
-    return $date_prefix . '-' . $district_code . '-' . str_pad($count, 4, '0', STR_PAD_LEFT);
+    return 'CUST-' . $date_prefix . '-' . str_pad($count, 5, '0', STR_PAD_LEFT);
 }
+
+// Get agent code for current user
+$agent_code = generateAgentCode($agent_id, $pdo);
+
+// Get districts, police stations, and post offices for Bangladesh
+<?php
+// Complete Districts of Bangladesh (64 districts with 2018 updated spellings)
+$districts = [
+    // Barishal Division (6 districts)
+    'Barishal', 'Barguna', 'Bhola', 'Jhalokati', 'Patuakhali', 'Pirojpur',
+    
+    // Chattogram Division (11 districts)
+    'Bandarban', 'Brahmanbaria', 'Chandpur', 'Chattogram', 'Cumilla', 
+    'Cox\'s Bazar', 'Feni', 'Khagrachhari', 'Lakshmipur', 'Noakhali', 'Rangamati',
+    
+    // Dhaka Division (13 districts)
+    'Dhaka', 'Faridpur', 'Gazipur', 'Gopalganj', 'Kishoreganj', 'Madaripur', 
+    'Manikganj', 'Munshiganj', 'Narayanganj', 'Narsingdi', 'Rajbari', 'Shariatpur', 'Tangail',
+    
+    // Khulna Division (10 districts)
+    'Bagerhat', 'Chuadanga', 'Jashore', 'Jhenaidah', 'Khulna', 'Kushtia', 
+    'Magura', 'Meherpur', 'Narail', 'Satkhira',
+    
+    // Mymensingh Division (4 districts)
+    'Jamalpur', 'Mymensingh', 'Netrokona', 'Sherpur',
+    
+    // Rajshahi Division (8 districts)
+    'Bogura', 'Joypurhat', 'Naogaon', 'Natore', 'Chapai Nawabganj', 'Pabna', 'Rajshahi', 'Sirajganj',
+    
+    // Rangpur Division (8 districts)
+    'Dinajpur', 'Gaibandha', 'Kurigram', 'Lalmonirhat', 'Nilphamari', 'Panchagarh', 'Rangpur', 'Thakurgaon',
+    
+    // Sylhet Division (4 districts)
+    'Habiganj', 'Moulvibazar', 'Sunamganj', 'Sylhet'
+];
+
+// Complete Police Stations (Thana/Upazila) by District
+$police_stations = [
+    // ========== BARISHAL DIVISION ==========
+    'Barishal' => [
+        'Agailjhara', 'Babuganj', 'Bakerganj', 'Banaripara', 'Barishal Sadar', 
+        'Gaurnadi', 'Hizla', 'Mehendiganj', 'Muladi', 'Wazirpur'
+    ],
+    'Barguna' => [
+        'Amtali', 'Bamna', 'Barguna Sadar', 'Betagi', 'Patharghata', 'Taltali'
+    ],
+    'Bhola' => [
+        'Bhola Sadar', 'Borhanuddin', 'Char Fasson', 'Daulatkhan', 'Lalmohan', 
+        'Manpura', 'Tazumuddin'
+    ],
+    'Jhalokati' => [
+        'Jhalokati Sadar', 'Kanthalia', 'Nalchity', 'Rajapur'
+    ],
+    'Patuakhali' => [
+        'Bauphal', 'Dashmina', 'Galachipa', 'Kalapara', 'Mirzaganj', 
+        'Patuakhali Sadar', 'Rangabali', 'Dumki'
+    ],
+    'Pirojpur' => [
+        'Bhandaria', 'Kawkhali', 'Mathbaria', 'Nazirpur', 'Pirojpur Sadar', 
+        'Nesarabad (Swarupkathi)', 'Zianagar'
+    ],
+
+    // ========== CHATTOGRAM DIVISION ==========
+    'Bandarban' => [
+        'Ali Kadam', 'Bandarban Sadar', 'Lama', 'Naikhongchhari', 'Rowangchhari', 
+        'Ruma', 'Thanchi'
+    ],
+    'Brahmanbaria' => [
+        'Akhaura', 'Bancharampur', 'Brahmanbaria Sadar', 'Kasba', 'Nabinagar', 
+        'Nasirnagar', 'Sarail', 'Ashuganj', 'Bijoynagar'
+    ],
+    'Chandpur' => [
+        'Chandpur Sadar', 'Faridganj', 'Haimchar', 'Haziganj', 'Kachua', 
+        'Matlabi Uttar', 'Matlabi Dakshin', 'Shahrasti'
+    ],
+    'Chattogram' => [
+        'Anwara', 'Banshkhali', 'Boalkhali', 'Chandanaish', 'Fatikchhari', 
+        'Hathazari', 'Karnaphuli', 'Lohagara', 'Mirsharai', 'Patiya', 
+        'Rangunia', 'Raozan', 'Sandwip', 'Satkania', 'Sitakunda'
+    ],
+    'Cumilla' => [
+        'Barura', 'Brahmanpara', 'Burichang', 'Chandina', 'Chauddagram', 
+        'Cumilla Sadar', 'Daudkandi', 'Debidwar', 'Homna', 'Laksam', 
+        'Meghna', 'Monohargonj', 'Muradnagar', 'Nangalkot', 'Titas'
+    ],
+    "Cox's Bazar" => [
+        'Chakaria', 'Cox\'s Bazar Sadar', 'Kutubdia', 'Maheshkhali', 'Ramu', 
+        'Teknaf', 'Ukhia', 'Pekua'
+    ],
+    'Feni' => [
+        'Chhagalnaiya', 'Daganbhuiyan', 'Feni Sadar', 'Fulgazi', 'Parshuram', 
+        'Sonagazi'
+    ],
+    'Khagrachhari' => [
+        'Dighinala', 'Khagrachhari Sadar', 'Lakshmichhari', 'Mahalchhari', 
+        'Manikchhari', 'Matiranga', 'Panchhari', 'Ramgarh'
+    ],
+    'Lakshmipur' => [
+        'Lakshmipur Sadar', 'Raipur', 'Ramganj', 'Ramgati', 'Kamalnagar'
+    ],
+    'Noakhali' => [
+        'Begumganj', 'Chatkhil', 'Companiganj', 'Hatiya', 'Kabirhat', 
+        'Noakhali Sadar', 'Senbagh', 'Sonaimuri', 'Subarnachar'
+    ],
+    'Rangamati' => [
+        'Bagaichhari', 'Barkal', 'Juraichhari', 'Kaptai', 'Langadu', 
+        'Naniyachar', 'Rajsthal', 'Rangamati Sadar'
+    ],
+
+    // ========== DHAKA DIVISION ==========
+    'Dhaka' => [
+        'Adabor', 'Badda', 'Bangshal', 'Cantonment', 'Chawkbazar', 
+        'Dakshinkhan', 'Darus Salam', 'Demra', 'Dhanmondi', 'Gendaria', 
+        'Gulshan', 'Hazaribagh', 'Jatrabari', 'Kadamtali', 'Kafrul', 
+        'Kalabagan', 'Kamrangirchar', 'Kotwali', 'Khilgaon', 'Khilkhet', 
+        'Lalbagh', 'Mirpur', 'Mohammadpur', 'Motijheel', 'New Market', 
+        'Pallabi', 'Paltan', 'Ramna', 'Rampura', 'Sabujbagh', 
+        'Shah Ali', 'Shahbag', 'Shyampur', 'Sher-e-Bangla Nagar', 'Sutrapur', 
+        'Tejgaon', 'Turag', 'Uttara', 'Uttar Khan', 'Bimanbandar'
+    ],
+    'Faridpur' => [
+        'Alfadanga', 'Bhanga', 'Boalmari', 'Charbhadrasan', 'Faridpur Sadar', 
+        'Madhukhali', 'Nagarkanda', 'Sadarpur', 'Saltha'
+    ],
+    'Gazipur' => [
+        'Gazipur Sadar', 'Kaliakair', 'Kaliganj', 'Kapasia', 'Sreepur', 
+        'Tongi'
+    ],
+    'Gopalganj' => [
+        'Gopalganj Sadar', 'Kashiani', 'Kotalipara', 'Muksudpur', 'Tungipara'
+    ],
+    'Kishoreganj' => [
+        'Astagram', 'Bajitpur', 'Bhairab', 'Hossainpur', 'Itna', 
+        'Karimganj', 'Katiadi', 'Kishoreganj Sadar', 'Kuliarchar', 'Mithamain', 
+        'Nikli', 'Pakundia', 'Tarail'
+    ],
+    'Madaripur' => [
+        'Kalkini', 'Madaripur Sadar', 'Rajoir', 'Shibchar'
+    ],
+    'Manikganj' => [
+        'Daulatpur', 'Ghior', 'Harirampur', 'Manikganj Sadar', 'Saturia', 
+        'Shivalaya', 'Singair'
+    ],
+    'Munshiganj' => [
+        'Gazaria', 'Lohajang', 'Munshiganj Sadar', 'Sirajdikhan', 'Sreenagar', 
+        'Tongibari'
+    ],
+    'Narayanganj' => [
+        'Araihazar', 'Bandar', 'Narayanganj Sadar', 'Rupganj', 'Sonargaon', 
+        'Fatullah', 'Siddhirganj'
+    ],
+    'Narsingdi' => [
+        'Belabo', 'Monohardi', 'Narsingdi Sadar', 'Palash', 'Raipura', 
+        'Shibpur'
+    ],
+    'Rajbari' => [
+        'Baliakandi', 'Goalandaghat', 'Pangsha', 'Rajbari Sadar', 'Kalukhali'
+    ],
+    'Shariatpur' => [
+        'Bhedarganj', 'Damudya', 'Gosairhat', 'Naria', 'Shariatpur Sadar', 
+        'Zajira', 'Shakhipur'
+    ],
+    'Tangail' => [
+        'Basail', 'Bhuapur', 'Delduar', 'Dhanbari', 'Ghatail', 
+        'Gopalpur', 'Kalihati', 'Madhupur', 'Mirzapur', 'Nagarpur', 
+        'Sakhipur', 'Tangail Sadar'
+    ],
+
+    // ========== KHULNA DIVISION ==========
+    'Bagerhat' => [
+        'Bagerhat Sadar', 'Chitalmari', 'Fakirhat', 'Kachua', 'Mollahat', 
+        'Mongla', 'Morrelganj', 'Rampal', 'Sarankhola'
+    ],
+    'Chuadanga' => [
+        'Alamdanga', 'Chuadanga Sadar', 'Damurhuda', 'Jibannagar'
+    ],
+    'Jashore' => [
+        'Abhaynagar', 'Bagherpara', 'Chaugachha', 'Jashore Sadar', 'Jhikargachha', 
+        'Keshabpur', 'Manirampur', 'Sharsha'
+    ],
+    'Jhenaidah' => [
+        'Harinakundu', 'Jhenaidah Sadar', 'Kaliganj', 'Kotchandpur', 'Maheshpur', 
+        'Shailkupa'
+    ],
+    'Khulna' => [
+        'Batiaghata', 'Dacope', 'Dighalia', 'Dumuria', 'Koyra', 
+        'Paikgachha', 'Phultala', 'Rupsha', 'Terokhada', 'Khulna City Corporation'
+    ],
+    'Kushtia' => [
+        'Bheramara', 'Daulatpur', 'Khoksa', 'Kumarkhali', 'Kushtia Sadar', 
+        'Mirpur'
+    ],
+    'Magura' => [
+        'Magura Sadar', 'Mohammadpur', 'Shalikha', 'Sreepur'
+    ],
+    'Meherpur' => [
+        'Gangni', 'Meherpur Sadar', 'Mujibnagar'
+    ],
+    'Narail' => [
+        'Kalia', 'Lohagara', 'Narail Sadar'
+    ],
+    'Satkhira' => [
+        'Assasuni', 'Debhata', 'Kalaroa', 'Kaliganj', 'Satkhira Sadar', 
+        'Shyamnagar', 'Tala'
+    ],
+
+    // ========== MYMENSINGH DIVISION ==========
+    'Jamalpur' => [
+        'Baksiganj', 'Dewanganj', 'Islampur', 'Jamalpur Sadar', 'Madarganj', 
+        'Melandaha', 'Sarishabari'
+    ],
+    'Mymensingh' => [
+        'Bhaluka', 'Dhobaura', 'Fulbaria', 'Gaffargaon', 'Gauripur', 
+        'Haluaghat', 'Ishwarganj', 'Mymensingh Sadar', 'Muktagachha', 'Nandail', 
+        'Phulpur', 'Trishal'
+    ],
+    'Netrokona' => [
+        'Atpara', 'Barhatta', 'Durgapur', 'Kalmakanda', 'Kendua', 
+        'Khaliajuri', 'Madan', 'Mohanganj', 'Netrokona Sadar', 'Purbadhala'
+    ],
+    'Sherpur' => [
+        'Jhenaigati', 'Nakla', 'Nalitabari', 'Sherpur Sadar', 'Sreebardi'
+    ],
+
+    // ========== RAJSHAHI DIVISION ==========
+    'Bogura' => [
+        'Adamdighi', 'Bogura Sadar', 'Dhunat', 'Dhupchanchia', 'Gabtali', 
+        'Kahaloo', 'Nandigram', 'Sariakandi', 'Shajahanpur', 'Sherpur', 
+        'Shibganj', 'Sonatala'
+    ],
+    'Joypurhat' => [
+        'Akkelpur', 'Joypurhat Sadar', 'Kalai', 'Khetlal', 'Panchbibi'
+    ],
+    'Naogaon' => [
+        'Atrai', 'Badalgachhi', 'Dhamoirhat', 'Manda', 'Mohadevpur', 
+        'Naogaon Sadar', 'Niamatpur', 'Patnitala', 'Porsha', 'Raninagar', 
+        'Sapahar'
+    ],
+    'Natore' => [
+        'Bagatipara', 'Baraigram', 'Gurudaspur', 'Lalpur', 'Natore Sadar', 
+        'Singra', 'Naldanga'
+    ],
+    'Chapai Nawabganj' => [
+        'Bholahat', 'Chapai Nawabganj Sadar', 'Gomastapur', 'Nachole', 'Shibganj'
+    ],
+    'Pabna' => [
+        'Atgharia', 'Bera', 'Bhangura', 'Chatmohar', 'Faridpur', 
+        'Ishwardi', 'Pabna Sadar', 'Santhia', 'Sujanagar', 'Aminpur'
+    ],
+    'Rajshahi' => [
+        'Bagha', 'Bagmara', 'Charghat', 'Durgapur', 'Godagari', 
+        'Mohanpur', 'Paba', 'Puthia', 'Rajshahi Sadar', 'Tanore'
+    ],
+    'Sirajganj' => [
+        'Belkuchi', 'Chauhali', 'Kamarkhanda', 'Kazipur', 'Raiganj', 
+        'Sirajganj Sadar', 'Shahjadpur', 'Tarash', 'Ullahpara'
+    ],
+
+    // ========== RANGPUR DIVISION ==========
+    'Dinajpur' => [
+        'Birampur', 'Birganj', 'Biral', 'Bochaganj', 'Chirirbandar', 
+        'Dinajpur Sadar', 'Ghoraghat', 'Hakimpur', 'Kaharole', 'Khansama', 
+        'Nawabganj', 'Parbatipur', 'Phulbari'
+    ],
+    'Gaibandha' => [
+        'Fulchhari', 'Gaibandha Sadar', 'Gobindaganj', 'Palashbari', 'Sadullapur', 
+        'Saghata', 'Sundarganj'
+    ],
+    'Kurigram' => [
+        'Bhurungamari', 'Char Rajibpur', 'Chilmari', 'Kurigram Sadar', 'Nageshwari', 
+        'Phulbari', 'Rajarhat', 'Raomari', 'Ulipur'
+    ],
+    'Lalmonirhat' => [
+        'Aditmari', 'Hatibandha', 'Kaliganj', 'Lalmonirhat Sadar', 'Patgram'
+    ],
+    'Nilphamari' => [
+        'Dimla', 'Domar', 'Jaldhaka', 'Kishoreganj', 'Nilphamari Sadar', 
+        'Saidpur'
+    ],
+    'Panchagarh' => [
+        'Atwari', 'Boda', 'Debiganj', 'Panchagarh Sadar', 'Tetulia'
+    ],
+    'Rangpur' => [
+        'Badarganj', 'Gangachara', 'Kaunia', 'Mithapukur', 'Pirgachha', 
+        'Pirganj', 'Rangpur Sadar', 'Taraganj'
+    ],
+    'Thakurgaon' => [
+        'Baliadangi', 'Haripur', 'Pirganj', 'Ranisankail', 'Thakurgaon Sadar'
+    ],
+
+    // ========== SYLHET DIVISION ==========
+    'Habiganj' => [
+        'Ajmiriganj', 'Bahubal', 'Baniachong', 'Chunarughat', 'Habiganj Sadar', 
+        'Lakhai', 'Madhabpur', 'Nabiganj', 'Shaistaganj'
+    ],
+    'Moulvibazar' => [
+        'Barlekha', 'Juri', 'Kamalganj', 'Kulaura', 'Moulvibazar Sadar', 
+        'Rajnagar', 'Sreemangal'
+    ],
+    'Sunamganj' => [
+        'Bishwamvarpur', 'Chhatak', 'Derai', 'Dharamapasha', 'Dowarabazar', 
+        'Jagannathpur', 'Jamalganj', 'Sullah', 'Sunamganj Sadar', 'Tahirpur'
+    ],
+    'Sylhet' => [
+        'Balaganj', 'Beanibazar', 'Bishwanath', 'Companiganj', 'Dakshin Surma', 
+        'Fenchuganj', 'Golapganj', 'Gowainghat', 'Jaintiapur', 'Kanaighat', 
+        'Osmani Nagar', 'Sylhet Sadar', 'Zakiganj'
+    ]
+];
+
+// Post offices mapping - simplified version (can be expanded)
+$post_offices = [
+    'Dhaka' => [
+        'Dhaka GPO', 'Bangshal', 'Gulshan', 'Banani', 'Motijheel', 
+        'Dhanmondi', 'Mirpur', 'Uttara', 'Mohammadpur', 'Jatrabari'
+    ],
+    'Chattogram' => ['Chattogram GPO', 'Agrabad', 'Panchlaish', 'Khulshi', 'Halishahar'],
+    'Khulna' => ['Khulna GPO', 'Sonadanga', 'Daulatpur', 'Khalishpur'],
+    'Rajshahi' => ['Rajshahi GPO', 'Boalia', 'Rajpara', 'Motihar'],
+    'Barishal' => ['Barishal GPO', 'Kawnia', 'Airport', 'Bottola'],
+    'Sylhet' => ['Sylhet GPO', 'Jalalabad', 'Shahporan', 'Taltala'],
+    'Rangpur' => ['Rangpur GPO', 'Haragach', 'Pirgacha'],
+    'Mymensingh' => ['Mymensingh GPO', 'Kewatkhali', 'Shambhuganj'],
+    'Cumilla' => ['Cumilla GPO', 'Kandirpar', 'Dhormopur'],
+    'Gazipur' => ['Gazipur GPO', 'Tongi', 'Joydebpur', 'Kaliakoir'],
+    'Narayanganj' => ['Narayanganj GPO', 'Fatullah', 'Siddhirganj'],
+    'Tangail' => ['Tangail GPO', 'Kagmari', 'Santosh'],
+    'Jashore' => ['Jashore GPO', 'Bagherpara', 'Chaugachha'],
+    'Bogura' => ['Bogura GPO', 'Adamdighi', 'Dhunat'],
+    'Kushtia' => ['Kushtia GPO', 'Bheramara', 'Daulatpur']
+];
 
 // Get location from IP (automatic location detection)
 function getLocationFromIP() {
     $ip = $_SERVER['REMOTE_ADDR'];
     
-    // Check if it's localhost
     if ($ip == '127.0.0.1' || $ip == '::1') {
         return ['city' => 'Dhaka', 'lat' => '23.8103', 'lng' => '90.4125'];
     }
     
-    // Use free IP API to get location
     $url = "http://ip-api.com/json/{$ip}";
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $url);
@@ -89,6 +409,7 @@ function getLocationFromIP() {
     return ['city' => 'Unknown', 'lat' => '23.8103', 'lng' => '90.4125'];
 }
 
+
 // Get current location for map
 $location = getLocationFromIP();
 $default_lat = $location['lat'];
@@ -103,6 +424,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $address = $_POST['address'] ?? '';
     $priority = $_POST['priority'];
     $lead_stage = $_POST['lead_stage'] ?? 'Lead';
+    if (empty($lead_stage)) {
+        $lead_stage = 'New Lead';
+    }
     $expected_amount = $_POST['expected_amount'] ?? 0;
     $next_followup = $_POST['next_followup'] ?? null;
     $country = $_POST['country'] ?? 'Bangladesh';
@@ -113,22 +437,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $latitude = $_POST['latitude'] ?? $default_lat;
     $longitude = $_POST['longitude'] ?? $default_lng;
     
-    $lead_unique_id = generateUniqueLeadId();
-    $user_custom_id = generateUserID($district, $pdo);
+    // Generate IDs
+    $lead_unique_id = generateUniqueLeadId(); // From config.php
+    $customer_id = generateCustomerID($pdo);
+    $user_custom_id = generateUserID($district, $pdo); // From config.php
+    
+    // Get agent info from session
+    $agent_id = $_SESSION['user_id'];
+    $agent_name = $_SESSION['full_name'];
+    $agent_code = generateAgentCode($agent_id, $pdo);
     
     try {
         $stmt = $pdo->prepare("INSERT INTO leads (
-            lead_unique_id, user_custom_id, name, email, phone, area, address, 
+            lead_unique_id, customer_id, user_custom_id, name, email, phone, area, address, 
             priority, lead_stage, expected_amount, next_followup_date, created_by,
             country, district, police_station, post_office, google_map_link, 
-            latitude, longitude
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            latitude, longitude, agent_id, agent_name, agent_code
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         
         $stmt->execute([
-            $lead_unique_id, $user_custom_id, $name, $email, $phone, $area, $address,
+            $lead_unique_id, $customer_id, $user_custom_id, $name, $email, $phone, $area, $address,
             $priority, $lead_stage, $expected_amount, $next_followup, $_SESSION['user_id'],
             $country, $district, $police_station, $post_office, $google_map_link,
-            $latitude, $longitude
+            $latitude, $longitude, $agent_id, $agent_name, $agent_code
         ]);
         
         $lead_id = $pdo->lastInsertId();
@@ -145,8 +476,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         
         $message = "Lead created successfully!<br>
+                   Customer ID: $customer_id<br>
                    Lead ID: $lead_unique_id<br>
-                   User ID: $user_custom_id";
+                   User ID: $user_custom_id<br>
+                   Agent: $agent_name ($agent_code)";
         
         // Create notification for next followup
         if ($next_followup && $next_followup > date('Y-m-d')) {
@@ -165,6 +498,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 ?>
 
 <style>
+    .info-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 20px;
+        border-radius: 12px;
+        margin-bottom: 25px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    .agent-info {
+        display: flex;
+        gap: 20px;
+        flex-wrap: wrap;
+    }
+    .agent-info-item {
+        background: rgba(255,255,255,0.2);
+        padding: 8px 15px;
+        border-radius: 8px;
+    }
+    .agent-info-item i {
+        margin-right: 8px;
+    }
     .location-picker {
         border: 2px solid #3498db;
         border-radius: 10px;
@@ -228,10 +585,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         color: #666;
         margin-top: 5px;
     }
+    .id-badge {
+        display: inline-block;
+        background: #27ae60;
+        color: white;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 12px;
+        margin-left: 10px;
+    }
 </style>
 
 <div style="max-width: 900px; margin: 0 auto; background: white; border-radius: 10px; padding: 30px;">
     <h2 style="margin-bottom: 20px;">Add New Lead</h2>
+    
+    <!-- Agent Information Card -->
+    <div class="info-card">
+        <div class="agent-info">
+            <div class="agent-info-item">
+                <i class="fas fa-user-tie"></i> Agent: <strong><?php echo htmlspecialchars($agent_name); ?></strong>
+            </div>
+            <div class="agent-info-item">
+                <i class="fas fa-id-card"></i> Agent Code: <strong><?php echo $agent_code; ?></strong>
+            </div>
+            <div class="agent-info-item">
+                <i class="fas fa-user-circle"></i> Username: <strong><?php echo htmlspecialchars($agent_username); ?></strong>
+            </div>
+        </div>
+        <div class="agent-info-item" style="background: rgba(255,255,255,0.3);">
+            <i class="fas fa-calendar"></i> <?php echo date('F j, Y'); ?>
+        </div>
+    </div>
     
     <?php if($message): ?>
         <div style="background: #d4edda; color: #155724; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
@@ -541,6 +925,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             document.getElementById('police_station').dispatchEvent(event);
         }
     });
+</script>
+
+<script>
+// When form is successfully submitted, notify parent window (if in iframe)
+<?php if($message && strpos($message, 'successfully') !== false): ?>
+if (window.parent !== window) {
+    window.parent.postMessage('leadSaved', '*');
+}
+<?php endif; ?>
 </script>
 
 <?php 

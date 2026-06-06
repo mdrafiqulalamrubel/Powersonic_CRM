@@ -11,6 +11,9 @@ if (!isLoggedIn() || !isAdmin()) {
 // Include header AFTER all PHP logic
 require_once 'includes/header.php';
 
+// Get company prefixes
+$prefixes = getCompanyPrefixes($pdo);
+
 // Fetch statistics
 $totalLeads = $pdo->query("SELECT COUNT(*) FROM leads")->fetchColumn();
 $highPriority = $pdo->query("SELECT COUNT(*) FROM leads WHERE priority = 'High'")->fetchColumn();
@@ -19,8 +22,11 @@ $convertedThisMonth = $pdo->query("SELECT COUNT(*) FROM leads WHERE status = 'Co
 // Fetch leads grouped by area and priority
 $areaWiseLeads = $pdo->query("SELECT area, priority, COUNT(*) as count FROM leads GROUP BY area, priority ORDER BY area, FIELD(priority, 'High', 'Medium', 'Low')")->fetchAll();
 
-// Fetch recent leads
-$recentLeads = $pdo->query("SELECT * FROM leads ORDER BY created_at DESC LIMIT 10")->fetchAll();
+// Fetch recent leads with agent info
+$recentLeads = $pdo->query("SELECT l.*, u.agent_code, u.full_name as agent_full_name 
+                            FROM leads l 
+                            LEFT JOIN users u ON l.created_by = u.id 
+                            ORDER BY l.created_at DESC LIMIT 10")->fetchAll();
 ?>
 
 <div class="stats-grid">
@@ -64,10 +70,12 @@ $recentLeads = $pdo->query("SELECT * FROM leads ORDER BY created_at DESC LIMIT 1
     <table class="data-table">
         <thead>
             <tr>
+                <th>Customer ID</th>
                 <th>Lead ID</th>
                 <th>Name</th>
                 <th>Phone</th>
                 <th>Area</th>
+                <th>Agent</th>
                 <th>Priority</th>
                 <th>Status</th>
                 <th>Created</th>
@@ -77,10 +85,22 @@ $recentLeads = $pdo->query("SELECT * FROM leads ORDER BY created_at DESC LIMIT 1
         <tbody>
             <?php foreach($recentLeads as $lead): ?>
             <tr>
+                <td>
+                    <small style="font-family: monospace; background: #e8f4f8; padding: 2px 5px; border-radius: 3px;">
+                        <?php echo $lead['customer_id'] ?? 'N/A'; ?>
+                    </small>
+                </td>
                 <td><?php echo $lead['lead_unique_id']; ?></td>
                 <td><?php echo htmlspecialchars($lead['name']); ?></td>
                 <td><?php echo $lead['phone']; ?></td>
                 <td><?php echo htmlspecialchars($lead['area']); ?></td>
+                <td>
+                    <?php if($lead['agent_code']): ?>
+                        <small><?php echo $lead['agent_code']; ?></small>
+                    <?php else: ?>
+                        <small>-</small>
+                    <?php endif; ?>
+                </td>
                 <td class="priority-<?php echo strtolower($lead['priority']); ?>"><?php echo $lead['priority']; ?></td>
                 <td><?php echo $lead['status']; ?></td>
                 <td><?php echo date('Y-m-d', strtotime($lead['created_at'])); ?></td>

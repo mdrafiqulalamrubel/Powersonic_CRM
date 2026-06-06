@@ -501,6 +501,175 @@ $current_page = basename($_SERVER['PHP_SELF']);
         .btn-danger { background: #e74c3c; }
         .btn-warning { background: #f39c12; }
         .btn-sm { padding: 5px 10px; font-size: 11px; }
+
+        /* Dark Mode Variables */
+        :root {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f5f5f5;
+            --text-primary: #333333;
+            --text-secondary: #666666;
+            --border-color: #e0e0e0;
+            --card-bg: #ffffff;
+            --header-bg: #2c3e50;
+            --sidebar-bg: #1a1e2b;
+        }
+
+        body.dark-mode {
+            --bg-primary: #1a1a1a;
+            --bg-secondary: #2d2d2d;
+            --text-primary: #ffffff;
+            --text-secondary: #b3b3b3;
+            --border-color: #404040;
+            --card-bg: #2d2d2d;
+            --header-bg: #0f0f0f;
+            --sidebar-bg: #0a0e17;
+        }
+
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        .stat-card, .data-table, .form-container, .card {
+            background-color: var(--card-bg);
+            border-color: var(--border-color);
+        }
+
+        .data-table td {
+            border-bottom-color: var(--border-color);
+        }
+
+        .dark-mode-toggle {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            z-index: 1000;
+            font-size: 24px;
+            transition: transform 0.3s ease;
+        }
+
+        .dark-mode-toggle:hover {
+            transform: scale(1.1);
+        }
+
+        /* Toast Notifications */
+        .toast-notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            color: white;
+            z-index: 10000;
+            animation: slideInRight 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .toast-success { background: #27ae60; }
+        .toast-error { background: #e74c3c; }
+        .toast-info { background: #3498db; }
+        .toast-warning { background: #f39c12; }
+
+        @keyframes slideInRight {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes fadeOut {
+            to {
+                opacity: 0;
+                transform: translateX(100%);
+            }
+        }
+
+        /* Keyboard shortcut hint */
+        .shortcuts-hint {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-family: monospace;
+            z-index: 999;
+            cursor: pointer;
+            transition: opacity 0.3s;
+        }
+
+        .shortcuts-hint:hover {
+            background: rgba(0,0,0,0.9);
+        }
+
+        kbd {
+            background: #f4f4f4;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            padding: 2px 6px;
+            font-family: monospace;
+            font-size: 11px;
+            margin: 0 2px;
+            color: #333;
+        }
+
+        body.dark-mode kbd {
+            background: #444;
+            border-color: #666;
+            color: #fff;
+        }
+
+        /* Inline Editing */
+        .editable-field {
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: background 0.2s;
+            display: inline-block;
+        }
+
+        .editable-field:hover {
+            background: rgba(52, 152, 219, 0.15);
+        }
+
+        .inline-edit-input {
+            padding: 4px 8px;
+            border: 2px solid #3498db;
+            border-radius: 4px;
+            font-size: inherit;
+            background: var(--card-bg);
+            color: var(--text-primary);
+        }
+
+        /* Autosave indicator */
+        #autosave-indicator {
+            position: fixed;
+            bottom: 80px;
+            right: 20px;
+            background: #f39c12;
+            color: white;
+            padding: 8px 15px;
+            border-radius: 8px;
+            font-size: 12px;
+            z-index: 9999;
+            display: none;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }        
     </style>
 </head>
 <body>
@@ -565,7 +734,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
                         <i class="fas fa-list"></i>
                         <span class="menu-text">View All Leads</span>
                     </a>
-                </div>
+                </div>               
 
                 <!-- Communications -->
                 <div class="menu-item has-submenu" onclick="toggleSubmenu(this)">
@@ -683,7 +852,10 @@ $current_page = basename($_SERVER['PHP_SELF']);
                         'change_password.php' => 'Change Password',
                         'manage_users.php' => 'User Management',
                         'add_user.php' => 'Add New User',
-                        'user_activity.php' => 'User Activity Log'
+                        'user_activity.php' => 'User Activity Log',
+                        // 'kanban.php' => 'Kanban Board',
+                        'dashboard_customizable.php' => 'Custom Dashboard',
+                        'lead_pipeline.php' => 'Sales Pipeline'
                     ];
                     echo $page_titles[$current_page] ?? 'Power Sonic CRM';
                     ?>

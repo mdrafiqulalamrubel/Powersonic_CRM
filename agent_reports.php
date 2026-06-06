@@ -8,201 +8,177 @@ if (!isLoggedIn() || !isAdmin()) {
 
 require_once 'includes/header.php';
 
-// Get all agents for dropdown
-$agents_list = $pdo->query("SELECT id, full_name, username, email, phone, join_date, status FROM users WHERE role = 'field_agent' OR role = 'supervisor' ORDER BY full_name")->fetchAll();
+// Get statistics
+$total_leads = $pdo->query("SELECT COUNT(*) FROM leads")->fetchColumn();
+$total_users = $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'field_agent'")->fetchColumn();
+$total_converted = $pdo->query("SELECT COUNT(*) FROM leads WHERE lead_stage = 'Won'")->fetchColumn();
+$total_amount = $pdo->query("SELECT COALESCE(SUM(expected_amount), 0) FROM leads WHERE lead_stage = 'Won'")->fetchColumn();
 
-// Get selected agent
-$selected_agent_id = $_GET['agent_id'] ?? 0;
-$selected_agent = null;
+// Get leads by stage
+$stage_data = $pdo->query("
+    SELECT COALESCE(lead_stage, 'New Lead') as stage, COUNT(*) as count 
+    FROM leads 
+    GROUP BY lead_stage 
+    ORDER BY count DESC
+")->fetchAll();
 
-if ($selected_agent_id) {
-    $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ? AND (role = 'field_agent' OR role = 'supervisor')");
-    $stmt->execute([$selected_agent_id]);
-    $selected_agent = $stmt->fetch();
-}
+// Get agent performance
+$agent_performance = $pdo->query("
+    SELECT 
+        u.id,
+        u.full_name,
+        u.username,
+        COUNT(l.id) as total_leads,
+        SUM(CASE WHEN l.lead_stage = 'Won' THEN 1 ELSE 0 END) as won_leads,
+        SUM(CASE WHEN l.lead_stage = 'Won' THEN l.expected_amount ELSE 0 END) as total_amount,
+        ROUND(
+            CASE WHEN COUNT(l.id) > 0 
+            THEN (SUM(CASE WHEN l.lead_stage = 'Won' THEN 1 ELSE 0 END) * 100.0 / COUNT(l.id))
+            ELSE 0 END, 2
+        ) as conversion_rate,
+        MAX(l.created_at) as last_activity
+    FROM users u
+    LEFT JOIN leads l ON u.id = l.created_by
+    WHERE u.role = 'field_agent'
+    GROUP BY u.id, u.full_name, u.username
+    ORDER BY total_leads DESC
+")->fetchAll();
 
-// Get date filter
-$month = $_GET['month'] ?? date('Y-m');
-$start_date = $month . '-01';
-$end_date = date('Y-m-t', strtotime($start_date));
+// Get monthly performance
+$monthly_performance = $pdo->query("
+    SELECT 
+        DATE_FORMAT(created_at, '%Y-%m') as month,
+        COUNT(*) as total_leads,
+        SUM(CASE WHEN lead_stage = 'Won' THEN 1 ELSE 0 END) as won_leads,
+        COALESCE(SUM(CASE WHEN lead_stage = 'Won' THEN expected_amount ELSE 0 END), 0) as total_amount
+    FROM leads
+    WHERE created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
+    GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+    ORDER BY month DESC
+")->fetchAll();
 
-// Get year for yearly report
-$year = $_GET['year'] ?? date('Y');
-$report_type = $_GET['report_type'] ?? 'monthly'; // monthly, yearly, custom
-
-// Custom date range
-$custom_start = $_GET['custom_start'] ?? date('Y-m-01');
-$custom_end = $_GET['custom_end'] ?? date('Y-m-t');
-
-// Adjust date range based on report type
-if ($report_type == 'yearly') {
-    $start_date = $year . '-01-01';
-    $end_date = $year . '-12-31';
-} elseif ($report_type == 'custom') {
-    $start_date = $custom_start;
-    $end_date = $custom_end;
-}
-
-// Function to get agent performance data
-function getAgentPerformance($pdo, $agent_id, $start_date, $end_date) {
-    // Get lead statistics
-    $lead_stats = $pdo->prepare("
-        SELECT 
-            COUNT(*) as total_leads,
-            SUM(CASE WHEN lead_stage NOT IN ('Won', 'Lost', 'Cancelled') THEN 1 ELSE 0 END) as ongoing_leads,
-            SUM(CASE WHEN lead_stage = 'Won' THEN 1 ELSE 0 END) as won_leads,
-            SUM(CASE WHEN lead_stage IN ('Lost', 'Cancelled') THEN 1 ELSE 0 END) as lost_leads,
-            COALESCE(SUM(CASE WHEN lead_stage = 'Won' THEN expected_amount ELSE 0 END), 0) as total_revenue,
-            COALESCE(AVG(CASE WHEN lead_stage = 'Won' THEN expected_amount ELSE NULL END), 0) as avg_deal_size,
-            SUM(expected_amount) as pipeline_value
-        FROM leads 
-        WHERE created_by = ? 
-        AND DATE(created_at) BETWEEN ? AND ?
-    ");
-    $lead_stats->execute([$agent_id, $start_date, $end_date]);
-    return $lead_stats->fetch();
-}
-
-// Function to get stage-wise distribution
-function getStageDistribution($pdo, $agent_id, $start_date, $end_date) {
-    $stmt = $pdo->prepare("
-        SELECT lead_stage, COUNT(*) as count, SUM(expected_amount) as total_value
-        FROM leads
-        WHERE created_by = ? AND DATE(created_at) BETWEEN ? AND ?
-        GROUP BY lead_stage
-        ORDER BY FIELD(lead_stage, 'Lead', 'Pipeline', 'Qualified', 'Discussion Ongoing', 'Quotation Submitted', 'Final Negotiation', 'Won', 'Lost', 'Cancelled')
-    ");
-    $stmt->execute([$agent_id, $start_date, $end_date]);
-    return $stmt->fetchAll();
-}
-
-// Function to get monthly performance trend
-function getMonthlyTrend($pdo, $agent_id, $year) {
-    $stmt = $pdo->prepare("
-        SELECT 
-            DATE_FORMAT(created_at, '%Y-%m') as month,
-            COUNT(*) as total_leads,
-            SUM(CASE WHEN lead_stage = 'Won' THEN 1 ELSE 0 END) as won_leads,
-            COALESCE(SUM(CASE WHEN lead_stage = 'Won' THEN expected_amount ELSE 0 END), 0) as revenue
-        FROM leads
-        WHERE created_by = ? AND YEAR(created_at) = ?
-        GROUP BY DATE_FORMAT(created_at, '%Y-%m')
-        ORDER BY month ASC
-    ");
-    $stmt->execute([$agent_id, $year]);
-    return $stmt->fetchAll();
-}
-
-// Function to get recent activities
-function getRecentActivities($pdo, $agent_id, $limit = 10) {
-    $stmt = $pdo->prepare("
-        (SELECT 'lead' as type, id, lead_unique_id as ref_id, name, created_at, 'created' as action, NULL as notes
-         FROM leads WHERE created_by = ?)
-        UNION ALL
-        (SELECT 'communication' as type, c.id, l.lead_unique_id as ref_id, l.name, c.created_at, c.communication_type as action, c.notes
-         FROM communications c JOIN leads l ON c.lead_id = l.id WHERE c.created_by = ?)
-        UNION ALL
-        (SELECT 'task' as type, t.id, l.lead_unique_id as ref_id, l.name, t.created_at, t.task_title as action, t.description as notes
-         FROM tasks t JOIN leads l ON t.lead_id = l.id WHERE t.created_by = ?)
-        ORDER BY created_at DESC LIMIT $limit
-    ");
-    $stmt->execute([$agent_id, $agent_id, $agent_id]);
-    return $stmt->fetchAll();
-}
-
-// Get data for selected agent
-$agent_stats = null;
-$stage_distribution = [];
-$monthly_trend = [];
-$recent_activities = [];
-
-if ($selected_agent_id) {
-    $agent_stats = getAgentPerformance($pdo, $selected_agent_id, $start_date, $end_date);
-    $stage_distribution = getStageDistribution($pdo, $selected_agent_id, $start_date, $end_date);
-    $monthly_trend = getMonthlyTrend($pdo, $selected_agent_id, $year);
-    $recent_activities = getRecentActivities($pdo, $selected_agent_id, 15);
-}
-
-// Calculate win rate
-$win_rate = 0;
-if ($selected_agent_id && $agent_stats && $agent_stats['total_leads'] > 0) {
-    $win_rate = round(($agent_stats['won_leads'] / $agent_stats['total_leads']) * 100, 1);
-}
-
-// Predictive sales based on pipeline
-$predicted_revenue = 0;
-if ($selected_agent_id && $stage_distribution) {
-    $weights = [
-        'Lead' => 0.10,
-        'Pipeline' => 0.20,
-        'Qualified' => 0.35,
-        'Discussion Ongoing' => 0.50,
-        'Quotation Submitted' => 0.70,
-        'Final Negotiation' => 0.85
-    ];
-    foreach ($stage_distribution as $stage) {
-        if (isset($weights[$stage['lead_stage']])) {
-            $predicted_revenue += $stage['total_value'] * $weights[$stage['lead_stage']];
-        }
+// FIXED: Get recent activities with proper LIMIT syntax
+function getRecentActivities($pdo, $user_id = null, $limit = 10) {
+    if ($user_id) {
+        $stmt = $pdo->prepare("
+            SELECT 
+                'lead_created' as activity_type,
+                l.id as lead_id,
+                l.name as lead_name,
+                l.created_at as activity_date,
+                u.full_name as user_name
+            FROM leads l
+            LEFT JOIN users u ON l.created_by = u.id
+            WHERE l.created_by = ?
+            ORDER BY l.created_at DESC
+            LIMIT " . intval($limit)
+        );
+        $stmt->execute([$user_id]);
+    } else {
+        // Get leads
+        $stmt1 = $pdo->prepare("
+            SELECT 
+                'lead_created' as activity_type,
+                l.id as lead_id,
+                l.name as lead_name,
+                l.created_at as activity_date,
+                u.full_name as user_name
+            FROM leads l
+            LEFT JOIN users u ON l.created_by = u.id
+            ORDER BY l.created_at DESC
+            LIMIT " . intval($limit)
+        );
+        $stmt1->execute();
+        $leads = $stmt1->fetchAll();
+        
+        // Get communications
+        $stmt2 = $pdo->prepare("
+            SELECT 
+                'communication' as activity_type,
+                c.lead_id as lead_id,
+                l.name as lead_name,
+                c.created_at as activity_date,
+                u.full_name as user_name
+            FROM communications c
+            LEFT JOIN leads l ON c.lead_id = l.id
+            LEFT JOIN users u ON c.created_by = u.id
+            ORDER BY c.created_at DESC
+            LIMIT " . intval($limit)
+        );
+        $stmt2->execute();
+        $communications = $stmt2->fetchAll();
+        
+        // Get completed tasks
+        $stmt3 = $pdo->prepare("
+            SELECT 
+                'task_completed' as activity_type,
+                t.lead_id as lead_id,
+                l.name as lead_name,
+                t.completed_at as activity_date,
+                u.full_name as user_name
+            FROM tasks t
+            LEFT JOIN leads l ON t.lead_id = l.id
+            LEFT JOIN users u ON t.assigned_by = u.id
+            WHERE t.status = 'Completed' AND t.completed_at IS NOT NULL
+            ORDER BY t.completed_at DESC
+            LIMIT " . intval($limit)
+        );
+        $stmt3->execute();
+        $tasks = $stmt3->fetchAll();
+        
+        // Merge all activities
+        $all_activities = array_merge($leads, $communications, $tasks);
+        
+        // Sort by date
+        usort($all_activities, function($a, $b) {
+            return strtotime($b['activity_date']) - strtotime($a['activity_date']);
+        });
+        
+        // Limit results
+        return array_slice($all_activities, 0, $limit);
     }
+    
+    return $stmt->fetchAll();
 }
+
+// Get recent activities
+$recent_activities = getRecentActivities($pdo, null, 20);
+
+// Get filter parameters
+$selected_agent = $_GET['agent_id'] ?? '';
+$date_from = $_GET['date_from'] ?? '';
+$date_to = $_GET['date_to'] ?? '';
+
+// Build filtered leads query
+$leads_query = "SELECT l.*, u.full_name as agent_name FROM leads l LEFT JOIN users u ON l.created_by = u.id WHERE 1=1";
+$params = [];
+
+if ($selected_agent) {
+    $leads_query .= " AND l.created_by = ?";
+    $params[] = $selected_agent;
+}
+if ($date_from) {
+    $leads_query .= " AND DATE(l.created_at) >= ?";
+    $params[] = $date_from;
+}
+if ($date_to) {
+    $leads_query .= " AND DATE(l.created_at) <= ?";
+    $params[] = $date_to;
+}
+
+$leads_query .= " ORDER BY l.created_at DESC LIMIT 50";
+$stmt = $pdo->prepare($leads_query);
+$stmt->execute($params);
+$filtered_leads = $stmt->fetchAll();
+
+// Get agents list for filter
+$agents = $pdo->query("SELECT id, full_name FROM users WHERE role = 'field_agent' ORDER BY full_name")->fetchAll();
 ?>
 
 <style>
-    .agent-selector {
-        background: white;
-        border-radius: 10px;
-        padding: 20px;
-        margin-bottom: 20px;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-    }
-    
-    .agent-selector h3 {
-        margin-bottom: 15px;
-        color: #2c3e50;
-    }
-    
-    .selector-form {
-        display: flex;
-        gap: 15px;
-        flex-wrap: wrap;
-        align-items: flex-end;
-    }
-    
-    .selector-group {
-        flex: 1;
-        min-width: 200px;
-    }
-    
-    .selector-group label {
-        display: block;
-        margin-bottom: 5px;
-        font-weight: 600;
-        font-size: 12px;
-        color: #666;
-    }
-    
-    .selector-group select, 
-    .selector-group input {
-        width: 100%;
-        padding: 10px;
-        border: 1px solid #ddd;
-        border-radius: 5px;
-        font-size: 14px;
-    }
-    
-    .btn-primary {
-        background: #3498db;
-        color: white;
-        padding: 10px 20px;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-    }
-    
     .stats-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
         gap: 20px;
         margin-bottom: 30px;
     }
@@ -211,66 +187,45 @@ if ($selected_agent_id && $stage_distribution) {
         background: white;
         padding: 20px;
         border-radius: 10px;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-        transition: transform 0.3s;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        text-align: center;
     }
     
-    .stat-card:hover {
-        transform: translateY(-3px);
-    }
-    
-    .stat-card .stat-icon {
-        font-size: 32px;
+    .stat-card h3 {
+        font-size: 14px;
+        color: #666;
         margin-bottom: 10px;
     }
     
-    .stat-card h4 {
-        color: #666;
-        font-size: 12px;
-        margin-bottom: 8px;
-    }
-    
-    .stat-card .stat-number {
-        font-size: 28px;
+    .stat-number {
+        font-size: 32px;
         font-weight: bold;
-    }
-    
-    .stat-card .stat-label {
-        font-size: 11px;
-        color: #666;
-        margin-top: 5px;
-    }
-    
-    .section {
-        background: white;
-        border-radius: 10px;
-        padding: 20px;
-        margin-bottom: 30px;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-    }
-    
-    .section h3 {
-        margin-bottom: 15px;
         color: #2c3e50;
-        border-bottom: 2px solid #3498db;
-        padding-bottom: 8px;
+    }
+    
+    .stat-label {
+        font-size: 12px;
+        color: #27ae60;
+        margin-top: 5px;
     }
     
     .data-table {
         width: 100%;
-        border-collapse: collapse;
+        background: white;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
     }
     
     .data-table th {
         background: #34495e;
         color: white;
-        padding: 10px;
+        padding: 12px;
         text-align: left;
-        font-size: 12px;
     }
     
     .data-table td {
-        padding: 10px;
+        padding: 12px;
         border-bottom: 1px solid #eee;
     }
     
@@ -278,415 +233,320 @@ if ($selected_agent_id && $stage_distribution) {
         background: #f8f9fa;
     }
     
-    .won { color: #27ae60; font-weight: bold; }
-    .lost { color: #e74c3c; }
-    .ongoing { color: #f39c12; }
-    
-    .stage-badge {
-        display: inline-block;
-        padding: 3px 10px;
-        border-radius: 15px;
-        font-size: 11px;
-        font-weight: bold;
-    }
-    
-    .progress-bar {
-        background: #e0e0e0;
-        border-radius: 10px;
-        overflow: hidden;
-        height: 8px;
-        margin: 10px 0;
-    }
-    
-    .progress-fill {
-        background: #27ae60;
-        height: 100%;
-        transition: width 0.5s;
-    }
-    
-    .agent-info-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 25px;
+    .filter-section {
+        background: white;
+        padding: 20px;
         border-radius: 10px;
         margin-bottom: 20px;
+    }
+    
+    .filter-form {
         display: flex;
-        justify-content: space-between;
-        align-items: center;
+        gap: 15px;
         flex-wrap: wrap;
+        align-items: flex-end;
     }
     
-    .agent-info h2 {
-        margin-bottom: 5px;
-    }
-    
-    .agent-info p {
-        opacity: 0.9;
-        margin: 5px 0;
-    }
-    
-    .export-buttons {
+    .filter-group {
         display: flex;
-        gap: 10px;
+        flex-direction: column;
     }
     
-    .btn-export {
-        background: rgba(255,255,255,0.2);
-        color: white;
-        padding: 8px 15px;
-        text-decoration: none;
-        border-radius: 5px;
+    .filter-group label {
         font-size: 12px;
-        display: inline-flex;
+        font-weight: 600;
+        margin-bottom: 5px;
+        color: #666;
+    }
+    
+    .filter-group select, .filter-group input {
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        min-width: 150px;
+    }
+    
+    .btn-filter {
+        background: #3498db;
+        color: white;
+        border: none;
+        padding: 8px 20px;
+        border-radius: 5px;
+        cursor: pointer;
+    }
+    
+    .btn-reset {
+        background: #95a5a6;
+        color: white;
+        text-decoration: none;
+        padding: 8px 20px;
+        border-radius: 5px;
+    }
+    
+    .activity-timeline {
+        max-height: 500px;
+        overflow-y: auto;
+    }
+    
+    .activity-item {
+        padding: 12px;
+        border-bottom: 1px solid #eee;
+        display: flex;
         align-items: center;
-        gap: 5px;
+        gap: 15px;
     }
     
-    .btn-export:hover {
-        background: rgba(255,255,255,0.3);
+    .activity-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
     }
     
-    .empty-state {
-        text-align: center;
-        padding: 50px;
+    .activity-icon.lead_created { background: #d4edda; color: #27ae60; }
+    .activity-icon.communication { background: #d1ecf1; color: #17a2b8; }
+    .activity-icon.task_completed { background: #fff3cd; color: #f39c12; }
+    
+    .activity-content {
+        flex: 1;
+    }
+    
+    .activity-title {
+        font-weight: 600;
+        margin-bottom: 3px;
+    }
+    
+    .activity-date {
+        font-size: 11px;
         color: #999;
     }
     
-    @media (max-width: 768px) {
-        .selector-form {
-            flex-direction: column;
-        }
-        .agent-info-card {
-            flex-direction: column;
-            text-align: center;
-            gap: 15px;
-        }
-        .stats-grid {
-            grid-template-columns: repeat(2, 1fr);
-        }
-    }
+    .conversion-high { color: #27ae60; font-weight: bold; }
+    .conversion-medium { color: #f39c12; font-weight: bold; }
+    .conversion-low { color: #e74c3c; font-weight: bold; }
+    
+    .priority-High { color: #e74c3c; font-weight: bold; }
+    .priority-Medium { color: #f39c12; font-weight: bold; }
+    .priority-Low { color: #27ae60; font-weight: bold; }
 </style>
 
-<div class="agent-selector">
-    <h3><i class="fas fa-user-tie"></i> Select Agent for Performance Report</h3>
-    <form method="GET" class="selector-form">
-        <div class="selector-group">
+<div class="stats-grid">
+    <div class="stat-card">
+        <h3><i class="fas fa-users"></i> Total Leads</h3>
+        <div class="stat-number"><?php echo $total_leads; ?></div>
+        <div class="stat-label">All time</div>
+    </div>
+    <div class="stat-card">
+        <h3><i class="fas fa-user-check"></i> Field Agents</h3>
+        <div class="stat-number"><?php echo $total_users; ?></div>
+        <div class="stat-label">Active agents</div>
+    </div>
+    <div class="stat-card">
+        <h3><i class="fas fa-trophy"></i> Won Deals</h3>
+        <div class="stat-number"><?php echo $total_converted; ?></div>
+        <div class="stat-label">Successfully converted</div>
+    </div>
+    <div class="stat-card">
+        <h3><i class="fas fa-money-bill"></i> Total Revenue</h3>
+        <div class="stat-number">৳<?php echo number_format($total_amount, 0); ?></div>
+        <div class="stat-label">From won deals</div>
+    </div>
+</div>
+
+<!-- Filter Section -->
+<div class="filter-section">
+    <form method="GET" class="filter-form">
+        <div class="filter-group">
             <label>Select Agent</label>
-            <select name="agent_id" required>
-                <option value="">-- Select an Agent --</option>
-                <?php foreach($agents_list as $agent): ?>
-                    <option value="<?php echo $agent['id']; ?>" 
-                        <?php echo ($selected_agent_id == $agent['id']) ? 'selected' : ''; ?>>
-                        <?php echo htmlspecialchars($agent['full_name']); ?> 
-                        (<?php echo htmlspecialchars($agent['username']); ?>)
-                        <?php echo $agent['status'] != 'active' ? ' - ' . ucfirst($agent['status']) : ''; ?>
-                    </option>
+            <select name="agent_id">
+                <option value="">All Agents</option>
+                <?php foreach($agents as $agent): ?>
+                <option value="<?php echo $agent['id']; ?>" <?php echo $selected_agent == $agent['id'] ? 'selected' : ''; ?>>
+                    <?php echo htmlspecialchars($agent['full_name']); ?>
+                </option>
                 <?php endforeach; ?>
             </select>
         </div>
-        
-        <div class="selector-group">
-            <label>Report Type</label>
-            <select name="report_type" id="report_type">
-                <option value="monthly" <?php echo $report_type == 'monthly' ? 'selected' : ''; ?>>Monthly</option>
-                <option value="yearly" <?php echo $report_type == 'yearly' ? 'selected' : ''; ?>>Yearly</option>
-                <option value="custom" <?php echo $report_type == 'custom' ? 'selected' : ''; ?>>Custom Range</option>
-            </select>
+        <div class="filter-group">
+            <label>Date From</label>
+            <input type="date" name="date_from" value="<?php echo $date_from; ?>">
         </div>
-        
-        <div class="selector-group" id="monthly_div">
-            <label>Select Month</label>
-            <input type="month" name="month" value="<?php echo $month; ?>">
+        <div class="filter-group">
+            <label>Date To</label>
+            <input type="date" name="date_to" value="<?php echo $date_to; ?>">
         </div>
-        
-        <div class="selector-group" id="yearly_div" style="display: none;">
-            <label>Select Year</label>
-            <select name="year">
-                <?php for($y = 2023; $y <= date('Y') + 1; $y++): ?>
-                    <option value="<?php echo $y; ?>" <?php echo $year == $y ? 'selected' : ''; ?>><?php echo $y; ?></option>
-                <?php endfor; ?>
-            </select>
+        <div class="filter-group">
+            <button type="submit" class="btn-filter"><i class="fas fa-filter"></i> Apply Filter</button>
         </div>
-        
-        <div class="selector-group" id="custom_div" style="display: none;">
-            <label>Start Date</label>
-            <input type="date" name="custom_start" value="<?php echo $custom_start; ?>">
-        </div>
-        
-        <div class="selector-group" id="custom_end_div" style="display: none;">
-            <label>End Date</label>
-            <input type="date" name="custom_end" value="<?php echo $custom_end; ?>">
-        </div>
-        
-        <div class="selector-group">
-            <button type="submit" class="btn-primary">
-                <i class="fas fa-chart-line"></i> View Report
-            </button>
+        <div class="filter-group">
+            <a href="agent_reports.php" class="btn-reset"><i class="fas fa-undo"></i> Reset</a>
         </div>
     </form>
 </div>
 
-<?php if($selected_agent_id && $selected_agent): ?>
-    <!-- Agent Info Card -->
-    <div class="agent-info-card">
-        <div class="agent-info">
-            <h2><i class="fas fa-user-circle"></i> <?php echo htmlspecialchars($selected_agent['full_name']); ?></h2>
-            <p><i class="fas fa-envelope"></i> <?php echo htmlspecialchars($selected_agent['email'] ?? 'No email'); ?> | 
-               <i class="fas fa-phone"></i> <?php echo htmlspecialchars($selected_agent['phone'] ?? 'No phone'); ?> |
-               <i class="fas fa-calendar"></i> Joined: <?php echo date('Y-m-d', strtotime($selected_agent['join_date'] ?? $selected_agent['created_at'])); ?></p>
-            <p><i class="fas fa-chart-line"></i> Report Period: <?php echo date('Y-m-d', strtotime($start_date)); ?> to <?php echo date('Y-m-d', strtotime($end_date)); ?></p>
-        </div>
-        <div class="export-buttons">
-            <a href="export_agent_report.php?agent_id=<?php echo $selected_agent_id; ?>&start_date=<?php echo $start_date; ?>&end_date=<?php echo $end_date; ?>&format=pdf" target="_blank" class="btn-export">
-                <i class="fas fa-file-pdf"></i> Export PDF
-            </a>
-            <a href="export_agent_report.php?agent_id=<?php echo $selected_agent_id; ?>&start_date=<?php echo $start_date; ?>&end_date=<?php echo $end_date; ?>&format=excel" class="btn-export">
-                <i class="fas fa-file-excel"></i> Export Excel
-            </a>
-        </div>
-    </div>
-    
-    <!-- Statistics Grid -->
-    <div class="stats-grid">
-        <div class="stat-card">
-            <div class="stat-icon"><i class="fas fa-users"></i></div>
-            <h4>Total Leads</h4>
-            <div class="stat-number"><?php echo $agent_stats['total_leads'] ?? 0; ?></div>
-            <div class="stat-label">Created in period</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon"><i class="fas fa-chart-line"></i></div>
-            <h4>Ongoing Leads</h4>
-            <div class="stat-number ongoing"><?php echo $agent_stats['ongoing_leads'] ?? 0; ?></div>
-            <div class="stat-label">In pipeline</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon"><i class="fas fa-trophy"></i></div>
-            <h4>Won Leads</h4>
-            <div class="stat-number won"><?php echo $agent_stats['won_leads'] ?? 0; ?></div>
-            <div class="stat-label">Successfully converted</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon"><i class="fas fa-times-circle"></i></div>
-            <h4>Lost Leads</h4>
-            <div class="stat-number lost"><?php echo $agent_stats['lost_leads'] ?? 0; ?></div>
-            <div class="stat-label">Lost/Cancelled</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon"><i class="fas fa-chart-simple"></i></div>
-            <h4>Win Rate</h4>
-            <div class="stat-number"><?php echo $win_rate; ?>%</div>
-            <div class="stat-label">Conversion rate</div>
-            <div class="progress-bar">
-                <div class="progress-fill" style="width: <?php echo $win_rate; ?>%;"></div>
-            </div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon"><i class="fas fa-dollar-sign"></i></div>
-            <h4>Total Revenue</h4>
-            <div class="stat-number won"><?php echo number_format($agent_stats['total_revenue'] ?? 0, 0); ?> BDT</div>
-            <div class="stat-label">From won deals</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon"><i class="fas fa-chart-pie"></i></div>
-            <h4>Pipeline Value</h4>
-            <div class="stat-number"><?php echo number_format($agent_stats['pipeline_value'] ?? 0, 0); ?> BDT</div>
-            <div class="stat-label">Potential deals</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon"><i class="fas fa-chart-line"></i></div>
-            <h4>Avg Deal Size</h4>
-            <div class="stat-number"><?php echo number_format($agent_stats['avg_deal_size'] ?? 0, 0); ?> BDT</div>
-            <div class="stat-label">Average won deal</div>
-        </div>
-    </div>
-    
-    <!-- Predictive Sales -->
-    <div class="section">
-        <h3><i class="fas fa-chart-line"></i> Predictive Sales Forecast</h3>
-        <div class="stats-grid">
-            <div class="stat-card">
-                <h4>Predicted Revenue</h4>
-                <div class="stat-number" style="color: #3498db;"><?php echo number_format($predicted_revenue, 0); ?> BDT</div>
-                <div class="stat-label">Based on weighted pipeline</div>
-            </div>
-            <div class="stat-card">
-                <h4>Leads in Pipeline</h4>
-                <div class="stat-number"><?php echo $agent_stats['ongoing_leads'] ?? 0; ?></div>
-                <div class="stat-label">Active opportunities</div>
-            </div>
-            <div class="stat-card">
-                <h4>Projected Completion</h4>
-                <div class="stat-number" style="color: #f39c12;"><?php echo round($predicted_revenue / max(($agent_stats['avg_deal_size'] ?? 1), 1), 0); ?></div>
-                <div class="stat-label">Expected number of deals</div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Stage-wise Pipeline -->
-    <div class="section">
-        <h3><i class="fas fa-filter"></i> Lead Pipeline by Stage</h3>
-        <?php if(count($stage_distribution) > 0): ?>
+<!-- Agent Performance Table -->
+<div style="background: white; border-radius: 10px; padding: 20px; margin-bottom: 30px;">
+    <h3><i class="fas fa-chart-line"></i> Agent Performance</h3>
+    <div style="overflow-x: auto;">
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>Stage</th>
-                    <th>Number of Leads</th>
-                    <th>Total Value (BDT)</th>
-                    <th>Average Value</th>
-                    <th>Weighted Value</th>
+                    <th>Agent Name</th>
+                    <th>Total Leads</th>
+                    <th>Won Deals</th>
+                    <th>Conversion Rate</th>
+                    <th>Total Amount</th>
+                    <th>Last Activity</th>
                 </tr>
             </thead>
             <tbody>
-                <?php 
-                $weights = ['Lead' => 0.10, 'Pipeline' => 0.20, 'Qualified' => 0.35, 'Discussion Ongoing' => 0.50, 'Quotation Submitted' => 0.70, 'Final Negotiation' => 0.85];
-                foreach($stage_distribution as $stage): 
-                    $weighted = isset($weights[$stage['lead_stage']]) ? $stage['total_value'] * $weights[$stage['lead_stage']] : 0;
-                ?>
-                <tr>
-                    <td><?php echo $stage['lead_stage']; ?></td>
-                    <td><?php echo $stage['count']; ?></td>
-                    <td><?php echo number_format($stage['total_value'], 2); ?></td>
-                    <td><?php echo $stage['count'] > 0 ? number_format($stage['total_value'] / $stage['count'], 2) : 0; ?></td>
-                    <td><?php echo number_format($weighted, 2); ?></td>
-                </tr>
-                <?php endforeach; ?>
+                <?php if(count($agent_performance) > 0): ?>
+                    <?php foreach($agent_performance as $agent): ?>
+                    <tr>
+                        <td><strong><?php echo htmlspecialchars($agent['full_name']); ?></strong></td>
+                        <td><?php echo $agent['total_leads']; ?></td>
+                        <td><?php echo $agent['won_leads']; ?></td>
+                        <td class="<?php 
+                            if($agent['conversion_rate'] >= 30) echo 'conversion-high';
+                            elseif($agent['conversion_rate'] >= 15) echo 'conversion-medium';
+                            else echo 'conversion-low';
+                        ?>">
+                            <?php echo $agent['conversion_rate']; ?>%
+                        </td>
+                        <td>৳<?php echo number_format($agent['total_amount'], 0); ?></td>
+                        <td><?php echo $agent['last_activity'] ? date('Y-m-d', strtotime($agent['last_activity'])) : 'No activity'; ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <tr>
+                        <td colspan="6" style="text-align: center;">No agents found</td>
+                    </tr>
+                <?php endif; ?>
             </tbody>
-         </table>
-        <?php else: ?>
-            <div class="empty-state">
-                <i class="fas fa-chart-bar" style="font-size: 48px;"></i>
-                <p>No lead data available for this period</p>
-            </div>
-        <?php endif; ?>
+        </table>
     </div>
-    
-    <!-- Monthly Performance Trend -->
-    <div class="section">
-        <h3><i class="fas fa-chart-line"></i> Monthly Performance Trend (<?php echo $year; ?>)</h3>
-        <?php if(count($monthly_trend) > 0): ?>
+</div>
+
+<!-- Monthly Performance -->
+<div style="background: white; border-radius: 10px; padding: 20px; margin-bottom: 30px;">
+    <h3><i class="fas fa-calendar-alt"></i> Monthly Performance (Last 6 Months)</h3>
+    <div style="overflow-x: auto;">
         <table class="data-table">
             <thead>
                 <tr>
                     <th>Month</th>
                     <th>Total Leads</th>
-                    <th>Won Leads</th>
-                    <th>Revenue (BDT)</th>
-                    <th>Conversion Rate</th>
+                    <th>Won Deals</th>
+                    <th>Total Amount</th>
                 </tr>
             </thead>
             <tbody>
-                <?php foreach($monthly_trend as $month_data): 
-                    $month_name = date('F Y', strtotime($month_data['month'] . '-01'));
-                    $conv_rate = $month_data['total_leads'] > 0 ? round(($month_data['won_leads'] / $month_data['total_leads']) * 100, 1) : 0;
-                ?>
-                <tr>
-                    <td><?php echo $month_name; ?></td>
-                    <td><?php echo $month_data['total_leads']; ?></td>
-                    <td class="won"><?php echo $month_data['won_leads']; ?></td>
-                    <td class="won"><?php echo number_format($month_data['revenue'], 2); ?></td>
-                    <td><?php echo $conv_rate; ?>%</td>
-                </tr>
-                <?php endforeach; ?>
+                <?php if(count($monthly_performance) > 0): ?>
+                    <?php foreach($monthly_performance as $month): ?>
+                    <tr>
+                        <td><?php echo date('F Y', strtotime($month['month'] . '-01')); ?></td>
+                        <td><?php echo $month['total_leads']; ?></td>
+                        <td><?php echo $month['won_leads']; ?></td>
+                        <td>৳<?php echo number_format($month['total_amount'], 0); ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <tr>
+                        <td colspan="4" style="text-align: center;">No data available</td>
+                    </tr>
+                <?php endif; ?>
             </tbody>
-         </table>
-        <?php else: ?>
-            <div class="empty-state">
-                <i class="fas fa-chart-line" style="font-size: 48px;"></i>
-                <p>No monthly data available for <?php echo $year; ?></p>
-            </div>
-        <?php endif; ?>
+        </table>
     </div>
-    
-    <!-- Recent Activities -->
-    <div class="section">
-        <h3><i class="fas fa-history"></i> Recent Activities</h3>
-        <?php if(count($recent_activities) > 0): ?>
+</div>
+
+<!-- Filtered Leads Table -->
+<div style="background: white; border-radius: 10px; padding: 20px; margin-bottom: 30px;">
+    <h3><i class="fas fa-list"></i> Leads List (Last 50)</h3>
+    <div style="overflow-x: auto;">
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>Date & Time</th>
-                    <th>Lead</th>
-                    <th>Action</th>
-                    <th>Details</th>
+                    <th>Lead ID</th>
+                    <th>Name</th>
+                    <th>Phone</th>
+                    <th>Agent</th>
+                    <th>Stage</th>
+                    <th>Priority</th>
+                    <th>Amount</th>
+                    <th>Created</th>
                 </tr>
             </thead>
             <tbody>
-                <?php foreach($recent_activities as $activity): ?>
-                <tr>
-                    <td><?php echo date('Y-m-d H:i', strtotime($activity['created_at'])); ?></td>
-                    <td>
-                        <a href="view_lead.php?id=<?php echo $activity['ref_id']; ?>" target="_blank">
-                            <?php echo htmlspecialchars($activity['name']); ?>
-                        </a>
-                    </td>
-                    <td>
-                        <span class="stage-badge" style="background: #e8f4f8; color: #3498db;">
-                            <?php echo ucfirst($activity['action']); ?>
-                        </span>
-                    </td>
-                    <td><?php echo htmlspecialchars(substr($activity['notes'] ?? '', 0, 100)); ?></td>
-                </tr>
-                <?php endforeach; ?>
+                <?php if(count($filtered_leads) > 0): ?>
+                    <?php foreach($filtered_leads as $lead): ?>
+                    <tr>
+                        <td><small><?php echo $lead['lead_unique_id']; ?></small></td>
+                        <td><?php echo htmlspecialchars($lead['name']); ?></td>
+                        <td><?php echo $lead['phone']; ?></td>
+                        <td><?php echo htmlspecialchars($lead['agent_name'] ?? 'Unassigned'); ?></td>
+                        <td><?php echo $lead['lead_stage'] ?? 'New Lead'; ?></td>
+                        <td class="priority-<?php echo $lead['priority'] ?? 'Medium'; ?>">
+                            <?php echo $lead['priority'] ?? 'Medium'; ?>
+                        </td>
+                        <td>৳<?php echo number_format($lead['expected_amount'] ?? 0, 0); ?></td>
+                        <td><?php echo date('Y-m-d', strtotime($lead['created_at'])); ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <tr>
+                        <td colspan="8" style="text-align: center;">No leads found</td>
+                    </tr>
+                <?php endif; ?>
             </tbody>
-         </table>
+        </table>
+    </div>
+</div>
+
+<!-- Recent Activities -->
+<div style="background: white; border-radius: 10px; padding: 20px;">
+    <h3><i class="fas fa-history"></i> Recent Activities</h3>
+    <div class="activity-timeline">
+        <?php if(count($recent_activities) > 0): ?>
+            <?php foreach($recent_activities as $activity): ?>
+            <div class="activity-item">
+                <div class="activity-icon <?php echo $activity['activity_type']; ?>">
+                    <?php if($activity['activity_type'] == 'lead_created'): ?>
+                        <i class="fas fa-user-plus"></i>
+                    <?php elseif($activity['activity_type'] == 'communication'): ?>
+                        <i class="fas fa-comment"></i>
+                    <?php else: ?>
+                        <i class="fas fa-check-circle"></i>
+                    <?php endif; ?>
+                </div>
+                <div class="activity-content">
+                    <div class="activity-title">
+                        <?php if($activity['activity_type'] == 'lead_created'): ?>
+                            New lead created: <strong><?php echo htmlspecialchars($activity['lead_name']); ?></strong>
+                        <?php elseif($activity['activity_type'] == 'communication'): ?>
+                            Communication added for: <strong><?php echo htmlspecialchars($activity['lead_name']); ?></strong>
+                        <?php else: ?>
+                            Task completed for: <strong><?php echo htmlspecialchars($activity['lead_name']); ?></strong>
+                        <?php endif; ?>
+                        <span style="font-size: 11px; color: #666;"> by <?php echo htmlspecialchars($activity['user_name']); ?></span>
+                    </div>
+                    <div class="activity-date">
+                        <?php echo date('Y-m-d H:i', strtotime($activity['activity_date'])); ?>
+                    </div>
+                </div>
+            </div>
+            <?php endforeach; ?>
         <?php else: ?>
-            <div class="empty-state">
-                <i class="fas fa-history" style="font-size: 48px;"></i>
-                <p>No recent activities found</p>
+            <div style="text-align: center; padding: 40px; color: #999;">
+                <i class="fas fa-inbox" style="font-size: 48px;"></i>
+                <p>No recent activities</p>
             </div>
         <?php endif; ?>
     </div>
-    
-<?php elseif($selected_agent_id && !$selected_agent): ?>
-    <div class="empty-state" style="background: white; border-radius: 10px; padding: 50px;">
-        <i class="fas fa-exclamation-triangle" style="font-size: 48px; color: #e74c3c;"></i>
-        <h3>Agent Not Found</h3>
-        <p>The selected agent does not exist or is not a field agent.</p>
-        <a href="agent_reports.php" class="btn-primary" style="display: inline-block; margin-top: 15px;">Go Back</a>
-    </div>
-<?php else: ?>
-    <div class="empty-state" style="background: white; border-radius: 10px; padding: 50px;">
-        <i class="fas fa-user-tie" style="font-size: 48px; color: #3498db;"></i>
-        <h3>Select an Agent to View Report</h3>
-        <p>Please select an agent from the dropdown above to view their performance report.</p>
-        <?php if(count($agents_list) == 0): ?>
-            <p style="color: #e74c3c; margin-top: 10px;">
-                <i class="fas fa-info-circle"></i> No field agents found. 
-                <a href="add_user.php">Click here to add an agent</a>
-            </p>
-        <?php endif; ?>
-    </div>
-<?php endif; ?>
-
-<script>
-    // Toggle date inputs based on report type
-    const reportType = document.getElementById('report_type');
-    const monthlyDiv = document.getElementById('monthly_div');
-    const yearlyDiv = document.getElementById('yearly_div');
-    const customDiv = document.getElementById('custom_div');
-    const customEndDiv = document.getElementById('custom_end_div');
-    
-    function toggleDateInputs() {
-        const type = reportType.value;
-        monthlyDiv.style.display = 'none';
-        yearlyDiv.style.display = 'none';
-        customDiv.style.display = 'none';
-        customEndDiv.style.display = 'none';
-        
-        if (type === 'monthly') {
-            monthlyDiv.style.display = 'block';
-        } else if (type === 'yearly') {
-            yearlyDiv.style.display = 'block';
-        } else if (type === 'custom') {
-            customDiv.style.display = 'block';
-            customEndDiv.style.display = 'block';
-        }
-    }
-    
-    reportType.addEventListener('change', toggleDateInputs);
-    toggleDateInputs();
-</script>
+</div>
 
 <?php 
 require_once 'includes/footer.php'; 

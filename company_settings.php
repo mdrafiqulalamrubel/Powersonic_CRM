@@ -17,7 +17,7 @@ $company = $stmt->fetch();
 
 if (!$company) {
     // Insert default if not exists
-    $pdo->exec("INSERT INTO company_settings (company_name) VALUES ('Power Sonic')");
+    $pdo->exec("INSERT INTO company_settings (company_name, lead_prefix, agent_prefix, customer_prefix) VALUES ('Power Sonic', 'PSL', 'AG', 'CUST')");
     $stmt = $pdo->query("SELECT * FROM company_settings LIMIT 1");
     $company = $stmt->fetch();
 }
@@ -54,6 +54,9 @@ function uploadCompanyLogo($file, $type = 'logo') {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Get all POST values
     $company_name = $_POST['company_name'] ?? '';
+    $lead_prefix = strtoupper($_POST['lead_prefix'] ?? 'PSL');
+    $agent_prefix = strtoupper($_POST['agent_prefix'] ?? 'AG');
+    $customer_prefix = strtoupper($_POST['customer_prefix'] ?? 'CUST');
     $company_email = $_POST['company_email'] ?? '';
     $company_phone = $_POST['company_phone'] ?? '';
     $company_mobile = $_POST['company_mobile'] ?? '';
@@ -107,7 +110,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     try {
         $update = $pdo->prepare("UPDATE company_settings SET 
-            company_name = ?, company_logo = ?, company_favicon = ?,
+            company_name = ?, lead_prefix = ?, agent_prefix = ?, customer_prefix = ?,
+            company_logo = ?, company_favicon = ?,
             company_email = ?, company_phone = ?, company_mobile = ?,
             company_address = ?, company_city = ?, company_state = ?,
             company_country = ?, company_postal_code = ?, company_website = ?,
@@ -121,7 +125,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             WHERE id = ?");
         
         $update->execute([
-            $company_name, $logo_path, $favicon_path,
+            $company_name, $lead_prefix, $agent_prefix, $customer_prefix,
+            $logo_path, $favicon_path,
             $company_email, $company_phone, $company_mobile,
             $company_address, $company_city, $company_state,
             $company_country, $company_postal_code, $company_website,
@@ -319,6 +324,12 @@ $currencies = [
         margin-top: 5px;
     }
     
+    .prefix-example {
+        font-size: 11px;
+        color: #27ae60;
+        margin-top: 3px;
+    }
+    
     @media (max-width: 768px) {
         .form-grid {
             grid-template-columns: 1fr;
@@ -360,7 +371,7 @@ $currencies = [
                             <div>
                                 <label class="upload-btn">
                                     <i class="fas fa-upload"></i> Upload Logo
-                                    <input type="file" name="company_logo" accept="image/*" style="display: none;" onchange="previewLogo(this, 'logo-preview-img')">
+                                    <input type="file" name="company_logo" accept="image/*" style="display: none;" onchange="previewLogo(this)">
                                 </label>
                                 <div class="info-text">Recommended: 200x200px, Max 2MB</div>
                             </div>
@@ -389,8 +400,28 @@ $currencies = [
                 </div>
             </div>
             
+            <!-- ID Prefix Settings -->
+            <h4 style="margin-bottom: 15px; color: #2c3e50;">ID Prefix Settings</h4>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Lead ID Prefix</label>
+                    <input type="text" name="lead_prefix" value="<?php echo htmlspecialchars($company['lead_prefix'] ?? 'PSL'); ?>" maxlength="10" style="text-transform: uppercase;">
+                    <div class="prefix-example">Example: <?php echo htmlspecialchars($company['lead_prefix'] ?? 'PSL'); ?>-20240606-0001</div>
+                </div>
+                <div class="form-group">
+                    <label>Agent Code Prefix</label>
+                    <input type="text" name="agent_prefix" value="<?php echo htmlspecialchars($company['agent_prefix'] ?? 'AG'); ?>" maxlength="10" style="text-transform: uppercase;">
+                    <div class="prefix-example">Example: <?php echo htmlspecialchars($company['agent_prefix'] ?? 'AG'); ?>-2024-0001</div>
+                </div>
+                <div class="form-group">
+                    <label>Customer ID Prefix</label>
+                    <input type="text" name="customer_prefix" value="<?php echo htmlspecialchars($company['customer_prefix'] ?? 'CUST'); ?>" maxlength="10" style="text-transform: uppercase;">
+                    <div class="prefix-example">Example: <?php echo htmlspecialchars($company['customer_prefix'] ?? 'CUST'); ?>-20240606-00001</div>
+                </div>
+            </div>
+            
             <!-- Basic Information -->
-            <h4 style="margin-bottom: 15px; color: #2c3e50;">Basic Information</h4>
+            <h4 style="margin: 20px 0 15px; color: #2c3e50;">Basic Information</h4>
             <div class="form-grid">
                 <div class="form-group">
                     <label>Company Name <span class="required">*</span></label>
@@ -557,7 +588,7 @@ $currencies = [
 </div>
 
 <script>
-    function previewLogo(input, previewClass) {
+    function previewLogo(input) {
         if (input.files && input.files[0]) {
             const reader = new FileReader();
             reader.onload = function(e) {
